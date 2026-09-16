@@ -27,6 +27,10 @@
 
   function prune() {
     const cutoff = now() - MAX_AGE_MS;
+    while (networkBlobs.length > 8) networkBlobs.shift();
+    while (blobsByUrl.size > 16) blobsByUrl.delete(blobsByUrl.keys().next().value);
+    while (playedMedia.length > 8) playedMedia.shift();
+    while (mediaSourcesByUrl.size > 8) mediaSourcesByUrl.delete(mediaSourcesByUrl.keys().next().value);
     for (const [url, entry] of blobsByUrl) {
       if (entry.createdAt < cutoff) blobsByUrl.delete(url);
     }
@@ -41,7 +45,7 @@
   }
 
   function rememberBlob(blob, { url = "", reason = "unknown", createdAt = now() } = {}) {
-    if (!(blob instanceof Blob) || blob.size < 1 || blob.size > MAX_BYTES) return;
+    if (!hasArmedCapture() || !(blob instanceof Blob) || blob.size < 1 || blob.size > MAX_BYTES) return;
     const entry = { blob, url, reason, createdAt };
     if (url) blobsByUrl.set(url, entry);
     networkBlobs.push(entry);
@@ -57,7 +61,7 @@
     const type = response.headers.get("content-type") || "";
     const length = Number(response.headers.get("content-length") || 0);
     if (length > MAX_BYTES) return false;
-    return type.toLowerCase().startsWith("audio/") || hasArmedCapture();
+    return hasArmedCapture() && (type.toLowerCase().startsWith("audio/") || type === "application/octet-stream");
   }
 
   async function rememberResponse(response, url, reason) {
@@ -75,6 +79,7 @@
   }
 
   function notePlayedMedia(media) {
+    if (!hasArmedCapture()) return;
     const entry = { media, source: mediaSource(media), playedAt: now() };
     playedMedia.push(entry);
     const cutoff = entry.playedAt - ARM_WINDOW_MS;
@@ -90,12 +95,12 @@
       direction: "from-page",
       type: "result",
       ...detail,
-    }, "*");
+    }, location.origin);
   }
 
   function onRequest(type, handler) {
     window.addEventListener("message", (event) => {
-      if (event.source !== window) return;
+      if (event.source !== window || event.origin !== location.origin) return;
       const message = event.data;
       if (message?.source !== "wpp-transcriber" || message.direction !== "to-page" || message.type !== type) return;
       handler(message);
@@ -129,7 +134,7 @@
   }
 
   async function fetchAudioSource(source) {
-    if (!source) return null;
+    if (!source || !source.startsWith(`blob:${location.origin}/`)) return null;
     const response = await originalFetch(source);
     if (!response.ok) return null;
     const blob = await response.blob();
@@ -275,16 +280,13 @@
       // MediaSource-backed blob URLs are not fetchable; record the element below.
     }
 
-    const nearby = [...networkBlobs].reverse().find((entry) => entry.createdAt >= session.armedAt - 1_000);
-    if (nearby && await blobLooksLikeAudio(nearby.blob)) return nearby.blob;
-
     return recordMediaElement(media);
   }
 
   URL.createObjectURL = function patchedCreateObjectURL(value) {
     const url = originalCreateObjectURL(value);
     if (value instanceof Blob) rememberBlob(value, { url, reason: "createObjectURL" });
-    else if (value instanceof MediaSource) mediaSourcesByUrl.set(url, { mediaSource: value, createdAt: now() });
+    else if (hasArmedCapture() && value instanceof MediaSource) mediaSourcesByUrl.set(url, { mediaSource: value, createdAt: now() });
     return url;
   };
 
@@ -297,7 +299,7 @@
   window.fetch = function patchedFetch(...args) {
     const requestUrl = typeof args[0] === "string" ? args[0] : args[0]?.url || "";
     const promise = originalFetch(...args);
-    promise.then((response) => rememberResponse(response.clone(), response.url || requestUrl, "fetch"));
+    if (hasArmedCapture()) promise.then((response) => rememberResponse(response.clone(), response.url || requestUrl, "fetch")).catch(() => {});
     return promise;
   };
 
@@ -312,7 +314,7 @@
       this.addEventListener("load", () => {
         try {
           const type = this.getResponseHeader("content-type") || "";
-          const relevant = type.toLowerCase().startsWith("audio/") || hasArmedCapture();
+          const relevant = hasArmedCapture() && (type.toLowerCase().startsWith("audio/") || type === "application/octet-stream");
           if (!relevant) return;
           let blob = null;
           if (this.response instanceof Blob) blob = this.response;
@@ -339,7 +341,7 @@
 
   SourceBuffer.prototype.appendBuffer = function patchedAppendBuffer(data) {
     const info = sourceBufferInfo.get(this);
-    if (info && (ArrayBuffer.isView(data) || data instanceof ArrayBuffer)) {
+    if (hasArmedCapture() && info && (ArrayBuffer.isView(data) || data instanceof ArrayBuffer)) {
       const bytes = data instanceof ArrayBuffer
         ? new Uint8Array(data.slice(0))
         : new Uint8Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength));
@@ -353,14 +355,15 @@
 
   onRequest("wpp-transcriber:arm", (message) => {
     const { captureId } = message;
-    if (!captureId) return;
+    if (typeof captureId !== "string" || captureId.length > 100 || captureSessions.size >= 4) return;
     captureSessions.set(captureId, { captureId, armedAt: now(), media: null });
     prune();
+    if (message.requestId) dispatchResult({ requestId: message.requestId });
   });
 
   onRequest("wpp-transcriber:read", async (message) => {
     const { requestId, url } = message;
-    if (!requestId || typeof url !== "string" || !url.startsWith("blob:")) return;
+    if (!requestId || typeof url !== "string" || !url.startsWith(`blob:${location.origin}/`)) return;
     const entry = blobsByUrl.get(url);
     if (!entry) {
       dispatchResult({ requestId, error: "BLOB_NOT_FOUND" });
@@ -388,48 +391,6 @@
     }
   });
 
-  onRequest("wpp-transcriber:latest", async (message) => {
-    const { requestId } = message;
-    if (!requestId) return;
-    const candidates = [...networkBlobs]
-      .filter(({ blob, createdAt }) => blob.size > 500 && now() - createdAt < 120_000)
-      .sort((a, b) => b.createdAt - a.createdAt);
-    let entry = null;
-    for (const candidate of candidates) {
-      if (await blobLooksLikeAudio(candidate.blob)) {
-        entry = candidate;
-        break;
-      }
-    }
-    if (!entry) dispatchResult({ requestId, error: "BLOB_NOT_FOUND" });
-    else await sendBlob(requestId, entry.blob);
-  });
-
-  window.__wppTranscriberDebug = () => ({
-    blobs: [...blobsByUrl].map(([url, entry]) => ({ url, type: entry.blob.type, size: entry.blob.size, reason: entry.reason })),
-    mediaSources: [...mediaSourcesByUrl].map(([url, entry]) => ({
-      url,
-      readyState: entry.mediaSource.readyState,
-      buffers: [...entry.mediaSource.sourceBuffers].map((buffer) => {
-        const info = sourceBufferInfo.get(buffer);
-        return { type: info?.type || "", chunks: info?.chunks.length || 0, size: info?.size || 0 };
-      }),
-    })),
-    played: playedMedia.map(({ media, source, playedAt }) => ({
-      source,
-      playedAt,
-      duration: media.duration,
-      currentTime: media.currentTime,
-      paused: media.paused,
-      ended: media.ended,
-      readyState: media.readyState,
-      srcObject: media.srcObject?.constructor?.name || "",
-    })),
-    sessions: [...captureSessions.values()].map(({ captureId, armedAt, media }) => ({
-      captureId,
-      armedAt,
-      hasMedia: Boolean(media),
-      source: media ? mediaSource(media) : "",
-    })),
-  });
+  // Keep audio references bounded even when the user stops interacting.
+  setInterval(prune, 60_000);
 })();

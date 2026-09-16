@@ -1,45 +1,24 @@
-import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const extensionRoot = path.join(root, "extension");
-const manifestPath = path.join(extensionRoot, "manifest.json");
-const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-
-assert.equal(manifest.manifest_version, 3, "O Dia exige Manifest V3.");
-assert.equal(
-  manifest.background?.service_worker,
-  "background.js",
-  "O background do Dia/Chromium MV3 deve usar service_worker.",
-);
-assert.equal(manifest.background?.scripts, undefined, "background.scripts é exclusivo do Firefox.");
-assert.ok(manifest.permissions?.includes("storage"), "A permissão storage é necessária.");
-assert.ok(
-  manifest.host_permissions?.includes("https://web.whatsapp.com/*"),
-  "A permissão do WhatsApp Web é necessária.",
-);
-assert.ok(
-  manifest.host_permissions?.includes("http://127.0.0.1:43110/*"),
-  "A permissão do serviço local é necessária.",
-);
-
-const referencedFiles = [
-  manifest.background.service_worker,
-  manifest.action?.default_popup,
-  ...manifest.content_scripts.flatMap((script) => [...(script.js || []), ...(script.css || [])]),
-];
-
-for (const relativePath of referencedFiles) {
-  assert.ok(
-    fs.existsSync(path.join(extensionRoot, relativePath)),
-    `Arquivo referenciado pelo manifest não existe: ${relativePath}`,
-  );
+import fs from 'node:fs';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+const directory = path.resolve(process.argv[2] || 'extension');
+const manifest = JSON.parse(fs.readFileSync(path.join(directory, 'manifest.json')));
+assert.equal(manifest.manifest_version, 3);
+assert.equal(manifest.background.type, 'module');
+assert.ok(manifest.minimum_chrome_version >= '120');
+assert.ok(!manifest.externally_connectable);
+assert.ok(!manifest.web_accessible_resources);
+assert.deepEqual(manifest.content_scripts.map(s => s.matches), [['https://web.whatsapp.com/*'], ['https://web.whatsapp.com/*']]);
+assert.ok(manifest.permissions.every(p => ['storage', 'alarms'].includes(p)));
+assert.ok((manifest.optional_permissions || []).every(p => p === 'notifications'));
+assert.equal(manifest.host_permissions.length, 2);
+assert.ok(manifest.host_permissions.every(p => p !== '<all_urls>' && !p.includes('*://')));
+assert.equal(manifest.content_security_policy.extension_pages, "script-src 'self'; object-src 'none'");
+const files = [manifest.background.service_worker, manifest.action.default_popup, ...Object.values(manifest.icons), ...manifest.content_scripts.flatMap(s => [...(s.js || []), ...(s.css || [])])];
+for (const filename of files) assert.ok(fs.existsSync(path.join(directory, filename)), `Arquivo ausente: ${filename}. Execute npm run build.`);
+for (const filename of fs.readdirSync(directory).filter(f => /\.(js|html)$/.test(f))) {
+  const text = fs.readFileSync(path.join(directory, filename), 'utf8');
+  assert.ok(!/\beval\s*\(|new\s+Function\s*\(|<script[^>]+src=["']https?:/.test(text), `Código remoto/eval em ${filename}`);
+  assert.ok(!/sk_(live|test)_[a-zA-Z0-9]{12}|sk-or-v1-[a-f0-9]{20}|whsec_[a-zA-Z0-9]{15}/.test(text), `Segredo em ${filename}`);
 }
-
-const mainWorldBridge = manifest.content_scripts.find((script) => script.js?.includes("page-bridge.js"));
-assert.equal(mainWorldBridge?.world, "MAIN", "O bridge precisa rodar no mundo principal.");
-assert.equal(mainWorldBridge?.run_at, "document_start", "O bridge precisa iniciar antes do WhatsApp.");
-
-console.log("Manifesto Chromium/Dia válido.");
+console.log('Manifesto, permissões, arquivos e ausência de código remoto: OK');
