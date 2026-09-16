@@ -1,0 +1,22 @@
+:root { color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; background: #f7f9f8; color: #111b21; }
+main { padding: 18px; }
+.brand { display: flex; align-items: center; gap: 11px; margin-bottom: 17px; }
+.brand__mark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 11px; background: #00a884; color: white; font-size: 18px; font-weight: 750; }
+h1, p { margin: 0; }
+h1 { font-size: 16px; line-height: 1.2; }
+.brand p { margin-top: 2px; color: #667781; font-size: 11px; }
+.status { display: flex; gap: 10px; padding: 12px; margin-bottom: 16px; border: 1px solid #dfe6e3; border-radius: 10px; background: white; }
+.status__dot { width: 9px; height: 9px; margin-top: 4px; border-radius: 50%; background: #f0b429; box-shadow: 0 0 0 3px rgba(240,180,41,.15); }
+.status[data-state="ok"] .status__dot { background: #00a884; box-shadow: 0 0 0 3px rgba(0,168,132,.15); }
+.status[data-state="error"] .status__dot { background: #d9485f; box-shadow: 0 0 0 3px rgba(217,72,95,.12); }
+.status strong { display: block; font-size: 12px; }
+.status p { margin-top: 3px; color: #667781; font-size: 11px; }
+label { display: block; margin: 0 0 6px; font-size: 11px; font-weight: 700; color: #54646d; }
+select { width: 100%; height: 36px; padding: 0 10px; border: 1px solid #cfd9d5; border-radius: 8px; background: white; color: inherit; font: inherit; font-size: 12px; }
+.actions { display: flex; gap: 8px; margin-top: 12px; }
+button { flex: 1; min-height: 34px; border: 0; border-radius: 8px; background: #00a884; color: white; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+button.secondary { background: #e4ece9; color: #006c4c; }
+.privacy { margin-top: 14px; color: #667781; font-size: 10px; line-height: 1.5; }
+@media (prefers-color-scheme: dark) { body { background: #111b21; color: #e9edef; } .status, select { background: #202c33; border-color: #35444c; } .brand p, .status p, label, .privacy { color: #aebac1; } button.secondary { background: #243b37; color: #43d6b2; } }

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Transcritor</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <div class="brand"><span class="brand__mark">T</span><div><h1>Transcritor</h1><p>WhatsApp para Dia</p></div></div>
+      <section class="status" data-state="loading">
+        <span class="status__dot"></span>
+        <div><strong>Verificando serviço…</strong><p>O serviço local protege sua chave.</p></div>
+      </section>
+      <label for="model">Modelo</label>
+      <select id="model">
+        <option value="openai/whisper-large-v3">Whisper Large V3</option>
+        <option value="openai/whisper-large-v3-turbo">Whisper Large V3 Turbo</option>
+        <option value="openai/gpt-4o-mini-transcribe">GPT-4o mini Transcribe</option>
+      </select>
+      <div class="actions"><button id="save" type="button">Salvar</button><button id="retry" type="button" class="secondary">Testar conexão</button></div>
+      <p class="privacy">Áudios visíveis são transcritos automaticamente. O texto só é resumido quando você clica em <strong>Resumir</strong>.</p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

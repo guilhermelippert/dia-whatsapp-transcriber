@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Fixture do transcritor</title>
+    <link rel="stylesheet" href="../extension/content.css">
+    <style>
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #efeae2; font-family: sans-serif; }
+      .phone { width: min(440px, calc(100vw - 32px)); padding: 38px 20px; background: #efeae2; }
+      [data-id] { width: 100%; }
+      [data-id] + [data-id] { margin-top: 18px; }
+      .message-column { display: flex; flex-direction: column; width: 100%; }
+      .message-column.incoming { align-items: flex-start; }
+      .message-column.outgoing { align-items: flex-end; }
+      .audio-bubble { box-sizing: border-box; width: 330px; padding: 10px 8px 6px; border-radius: 9px; background: white; box-shadow: 0 1px 1px rgba(0,0,0,.08); }
+      .outgoing .audio-bubble { border-radius: 9px 0 9px 9px; background: #d9fdd3; }
+      audio { width: 100%; height: 38px; }
+      .voice-button { width: 42px; height: 42px; border: 0; border-radius: 50%; color: white; background: #00a884; cursor: pointer; }
+      .hint { margin-top: 24px; color: #667781; font-size: 12px; text-align: center; }
+      .fixture-actions { display: flex; justify-content: center; align-items: center; gap: 12px; margin-top: 16px; }
+      .fixture-actions button { border: 0; border-radius: 999px; padding: 8px 12px; color: white; background: #006c4c; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <main class="phone">
+      <div data-id="fixture-message"><div class="message-column incoming"><div class="audio-bubble"><audio controls src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA="></audio></div></div></div>
+      <div data-id="fixture-voice-message"><div class="message-column outgoing"><div class="audio-bubble"><button class="voice-button" type="button" aria-label="Play voice message">▶</button></div></div></div>
+      <p class="hint">Fixture visual — clique em Transcrever</p>
+      <div class="fixture-actions">
+        <button id="add-audio" type="button">Adicionar áudio novo</button>
+        <button id="rerender-audio" type="button">Re-renderizar último</button>
+        <span>Transcrições: <output id="transcription-count">0</output></span>
+      </div>
+    </main>
+    <script>
+      const fixtureRun = new URLSearchParams(location.search).get("run") || "default";
+      const fixtureStorageKey = `wpp-transcriber-fixture:${fixtureRun}`;
+      const fixtureCallCountKey = `${fixtureStorageKey}:calls`;
+      const fixtureStorage = {
+        async get(defaults = {}) {
+          const saved = JSON.parse(localStorage.getItem(fixtureStorageKey) || "{}");
+          return { ...defaults, ...saved };
+        },
+        async set(values) {
+          const saved = JSON.parse(localStorage.getItem(fixtureStorageKey) || "{}");
+          localStorage.setItem(fixtureStorageKey, JSON.stringify({ ...saved, ...values }));
+        },
+        async remove(keys) {
+          const saved = JSON.parse(localStorage.getItem(fixtureStorageKey) || "{}");
+          for (const key of Array.isArray(keys) ? keys : [keys]) delete saved[key];
+          localStorage.setItem(fixtureStorageKey, JSON.stringify(saved));
+        },
+      };
+      globalThis.fixtureTranscriptions = Number(localStorage.getItem(fixtureCallCountKey) || 0);
+      globalThis.fixtureCopiedText = "";
+      document.querySelector("#transcription-count").textContent = String(globalThis.fixtureTranscriptions);
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: {
+          writeText: async (text) => {
+            globalThis.fixtureCopiedText = text;
+            document.documentElement.dataset.fixtureCopiedText = text;
+          },
+        },
+      });
+      globalThis.browser = { storage: { local: fixtureStorage }, runtime: { sendMessage: async (message) => {
+        if (message.type === "summarize") {
+          return { ok: true, text: "Resumo: o áudio explica os pontos principais de forma breve." };
+        }
+        globalThis.fixtureTranscriptions += 1;
+        localStorage.setItem(fixtureCallCountKey, String(globalThis.fixtureTranscriptions));
+        document.querySelector("#transcription-count").textContent = String(globalThis.fixtureTranscriptions);
+        const longText = "Esta é uma transcrição longa usada para validar o comportamento responsivo do painel. O texto precisa permanecer alinhado com a bolha do áudio, sem cobrir o player, a duração ou os controles. ".repeat(10);
+        return { ok: true, text: globalThis.fixtureTranscriptions === 1 ? "Transcrição curta recebida." : longText };
+      } } };
+      document.querySelector("#add-audio").addEventListener("click", () => {
+        const sequence = document.querySelectorAll('[data-id^="fixture-new-"]').length + 1;
+        const message = document.createElement("div");
+        message.dataset.id = `fixture-new-${sequence}`;
+        message.innerHTML = '<div class="message-column incoming"><div class="audio-bubble"><button class="voice-button" type="button" aria-label="Play voice message">▶</button></div></div>';
+        document.querySelector(".hint").before(message);
+      });
+      document.querySelector("#rerender-audio").addEventListener("click", () => {
+        const messages = [...document.querySelectorAll('[data-id^="fixture-new-"]')];
+        const previous = messages.at(-1);
+        if (!previous) return;
+        const id = previous.dataset.id;
+        previous.remove();
+        const replacement = document.createElement("div");
+        replacement.dataset.id = id;
+        replacement.innerHTML = '<div class="message-column incoming"><div class="audio-bubble"><button class="voice-button" type="button" aria-label="Play voice message">▶</button></div></div>';
+        document.querySelector(".hint").before(replacement);
+      });
+      window.addEventListener("message", (event) => {
+        const message = event.data;
+        if (event.source !== window || message?.source !== "wpp-transcriber" || message.direction !== "to-page") return;
+        if (message.type !== "wpp-transcriber:associated") return;
+        window.postMessage({
+          source: "wpp-transcriber",
+          direction: "from-page",
+          type: "result",
+          requestId: message.requestId,
+          data: "UklGRg==",
+          mime: "audio/wav",
+          size: 4,
+        }, "*");
+      });
+    </script>
+    <script src="../extension/content.js"></script>
+  </body>
+</html>

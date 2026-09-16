@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <title>Fixture do page bridge</title>
+  </head>
+  <body>
+    <main>
+      <h1>Fixture do page bridge</h1>
+      <output id="bridge-result">Executando…</output>
+    </main>
+    <script src="../extension/page-bridge.js"></script>
+    <script>
+      const output = document.querySelector("#bridge-result");
+      const wavHeader = new Uint8Array([
+        82, 73, 70, 70, 36, 0, 0, 0, 87, 65, 86, 69,
+        102, 109, 116, 32, 16, 0, 0, 0, 1, 0, 1, 0,
+        64, 31, 0, 0, 64, 31, 0, 0, 1, 0, 8, 0,
+        100, 97, 116, 97, 0, 0, 0, 0,
+      ]);
+      const blob = new Blob([wavHeader], { type: "audio/wav" });
+      const url = URL.createObjectURL(blob);
+      const expectedBase64 = btoa(String.fromCharCode(...wavHeader));
+      const results = {};
+
+      window.addEventListener("message", (event) => {
+        const message = event.data;
+        if (
+          event.source !== window
+          || message?.source !== "wpp-transcriber"
+          || message.direction !== "from-page"
+          || message.type !== "result"
+        ) return;
+
+        results[message.requestId] = message;
+        if (!results.found || !results.missing) return;
+
+        const passed = results.found.data === expectedBase64
+          && results.found.mime === "audio/wav"
+          && results.found.size === wavHeader.byteLength
+          && results.missing.error === "BLOB_NOT_FOUND";
+        output.dataset.state = passed ? "success" : "error";
+        output.textContent = passed
+          ? "Bridge capturou e devolveu o Blob corretamente."
+          : `Falha: ${JSON.stringify(results)}`;
+      });
+
+      window.postMessage({
+        source: "wpp-transcriber",
+        direction: "to-page",
+        type: "wpp-transcriber:read",
+        requestId: "found",
+        url,
+      }, "*");
+
+      window.postMessage({
+        source: "wpp-transcriber",
+        direction: "to-page",
+        type: "wpp-transcriber:read",
+        requestId: "missing",
+        url: "blob:http://127.0.0.1:43111/inexistente",
+      }, "*");
+    </script>
+  </body>
+</html>
