@@ -86,8 +86,9 @@ export function createApp(config, dependencies = {}) {
         const body = jsonBody(await readBody(req));
         if (body.confirm !== 'EXCLUIR') throw new HttpError(400, 'Confirme a exclusão.');
         await serial(account.id, async () => {
-          billing.patch(account.id, { deleting: true });
-          if (account.customer) await billing.request(`/customers/${encodeURIComponent(account.customer)}`, null, `dia-delete-${account.id}`, 'DELETE');
+          // Read the latest account INSIDE the customer lock: a queued checkout may have created a customer.
+          const current = billing.patch(account.id, { deleting: true });
+          if (current.customer) await billing.request(`/customers/${encodeURIComponent(current.customer)}`, null, `dia-delete-${account.id}`, 'DELETE');
           store.tx(() => {
             store.db.prepare('INSERT OR REPLACE INTO trial_claims VALUES(?,?)').run(store.emailHash(account.email), store.clock() + 180 * 86400000);
             store.db.prepare('DELETE FROM accounts WHERE id=?').run(account.id);

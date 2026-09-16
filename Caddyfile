@@ -1,0 +1,8 @@
+{$PUBLIC_BASE_URL} {
+  request_body {
+    max_size 35MB
+  }
+  reverse_proxy app:43110 {
+    header_up X-Real-IP {remote_host}
+  }
+}

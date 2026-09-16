@@ -1,0 +1,35 @@
+# Single replica: SQLite + customer locks do not support horizontal scaling.
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env.local
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      DATABASE_PATH: /data/dia.sqlite
+      TRUSTED_PROXY_IPS: 172.30.71.2
+    volumes: ["./data:/data"]
+    networks:
+      dia:
+        ipv4_address: 172.30.71.3
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: [/tmp]
+  proxy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    env_file: .env.local
+    volumes: ["./Caddyfile:/etc/caddy/Caddyfile:ro", "caddy_data:/data", "caddy_config:/config"]
+    networks:
+      dia:
+        ipv4_address: 172.30.71.2
+networks:
+  dia:
+    ipam:
+      config: [{subnet: 172.30.71.0/24}]
+volumes:
+  caddy_data:
+  caddy_config:

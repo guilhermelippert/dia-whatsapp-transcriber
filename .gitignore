@@ -1,1 +1,9 @@
-.env.local
+.env
+.env.*
+!.env.example
+node_modules/
+data/
+dist/
+artifacts/
+*.sqlite*
+web-ext-artifacts/
