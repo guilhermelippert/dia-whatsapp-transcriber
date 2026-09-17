@@ -53,11 +53,22 @@ export class Billing {
     return this.store.save({ ...a, ...values });
   }
   async price() {
-    if (this.priceCache && this.priceCache.until > this.store.clock()) return this.priceCache.value;
-    const p = await this.request(`/prices/${encodeURIComponent(this.config.stripePrice)}`);
-    if (!p.active || p.type !== 'recurring' || p.recurring?.interval !== 'month' || p.recurring?.interval_count !== 1 || !Number.isSafeInteger(p.unit_amount) || p.unit_amount <= 0 || !p.currency) throw new HttpError(503, 'O plano mensal não está configurado corretamente.');
-    const value = { name: 'Pro', amount: p.unit_amount, currency: p.currency, interval: 'month' };
-    this.priceCache = { value, until: this.store.clock() + 300000 }; return value;
+    const now = this.store.clock();
+    if (this.priceCache && this.priceCache.until > now) return this.priceCache.value;
+    if (this.priceFailure && this.priceFailure.until > now) throw this.priceFailure.error;
+    if (this.pricePending) return this.pricePending;
+    this.pricePending = Promise.resolve().then(async () => {
+      const p = await this.request(`/prices/${encodeURIComponent(this.config.stripePrice)}`);
+      if (!p.active || p.type !== 'recurring' || p.recurring?.interval !== 'month' || p.recurring?.interval_count !== 1 || !Number.isSafeInteger(p.unit_amount) || p.unit_amount <= 0 || !p.currency) throw new HttpError(503, 'O plano mensal não está configurado corretamente.');
+      const value = { name: 'Pro', amount: p.unit_amount, currency: p.currency, interval: 'month' };
+      this.priceCache = { value, until: this.store.clock() + 300000 };
+      this.priceFailure = null;
+      return value;
+    }).catch(error => {
+      this.priceFailure = { error, until: this.store.clock() + 10000 };
+      throw error;
+    }).finally(() => { this.pricePending = null; });
+    return this.pricePending;
   }
   async sync(id) {
     const a = this.store.account(id);

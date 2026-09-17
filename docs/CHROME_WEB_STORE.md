@@ -54,3 +54,5 @@ O backend deve estar ativo e permitir exatamente o ID da extensão submetida. Re
 - Ficha/privacidade/imagens/notas consistentes com o pacote e práticas reais; submeter e acompanhar a revisão.
 
 Referências: https://developer.chrome.com/docs/webstore/program-policies e https://developer.chrome.com/docs/webstore/publish
+
+O cache de comunicações é temporário: a chave AES-GCM fica somente na sessão do navegador. Ao reiniciar o navegador, sair ou revogar consentimento, o cache deixa de estar disponível. Não anunciar backup permanente de transcrições.

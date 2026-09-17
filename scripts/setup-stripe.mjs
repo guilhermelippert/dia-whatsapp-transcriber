@@ -1,5 +1,6 @@
 import { loadConfig } from '../src/config.mjs';
 import { stripeClient } from '../src/providers.mjs';
+import { ensureWebhook } from '../src/billing-config.mjs';
 const c = loadConfig(), request = stripeClient(c);
 if (!process.argv.includes('--apply')) throw new Error('Execute com --apply para criar produto/preço/portal/webhook na conta Stripe configurada. Use test primeiro.');
 const amount = Number(process.env.PRO_MONTHLY_AMOUNT || 2990);
@@ -13,11 +14,7 @@ if (!price) {
 }
 await request('/billing_portal/configurations', { 'business_profile[headline]': 'Gerencie sua assinatura Dia Pro', 'business_profile[privacy_policy_url]': `${c.baseUrl}/privacy`, 'business_profile[terms_of_service_url]': `${c.baseUrl}/terms`, 'features[subscription_cancel][enabled]': 'true', 'features[subscription_cancel][mode]': 'at_period_end', 'features[payment_method_update][enabled]': 'true', 'features[invoice_history][enabled]': 'true' }, 'dia-portal-v1');
 console.log(`STRIPE_PRICE_ID=${price.id}`);
-const hooks = await request('/webhook_endpoints?limit=100');
-if (!hooks.data?.some(h => h.url === `${c.baseUrl}/stripe/webhook` && h.status === 'enabled')) {
-  const events = ['customer.subscription.created','customer.subscription.updated','customer.subscription.deleted','customer.subscription.paused','customer.subscription.resumed','invoice.paid','invoice.payment_failed','checkout.session.completed','checkout.session.expired'];
-  const values = { url: `${c.baseUrl}/stripe/webhook`, api_version: c.stripeVersion, ...Object.fromEntries(events.map((e,i) => [`enabled_events[${i}]`,e])) };
-  const webhook = await request('/webhook_endpoints', values, 'dia-webhook-v1');
-  console.log(`STRIPE_WEBHOOK_SECRET=${webhook.secret}`);
-} else console.log('Webhook existente. Preserve seu STRIPE_WEBHOOK_SECRET.');
+const webhook = await ensureWebhook(request, c);
+if (webhook.secret) console.log(`STRIPE_WEBHOOK_SECRET=${webhook.secret}`);
+else console.log('Webhook existente validado/atualizado. Preserve seu STRIPE_WEBHOOK_SECRET.');
 console.log('Não compartilhe esta saída. Configure o portal padrão e a URL de termos em Stripe > Settings > Business > Public details antes de aceitar pagamentos.');

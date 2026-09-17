@@ -60,3 +60,36 @@ export function serialQueue() {
     try { return await current; } finally { if (tails.get(key) === current) tails.delete(key); }
   };
 }
+
+// Check canonical padding bits without decoding and duplicating large audio buffers.
+export function isCanonicalBase64(value) {
+  if (typeof value !== 'string' || !value.length || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) return false;
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  if (value.endsWith('==')) return (alphabet.indexOf(value.at(-3)) & 15) === 0;
+  if (value.endsWith('=')) return (alphabet.indexOf(value.at(-2)) & 3) === 0;
+  return true;
+}
+// Length framing prevents ambiguous concatenations and avoids one large JSON copy.
+export function hmacParts(key, parts) {
+  const mac = createHmac('sha256', Buffer.from(key, 'hex'));
+  for (const part of parts) {
+    if (typeof part !== 'string') throw new TypeError('Fingerprint parts must be strings.');
+    const size = Buffer.alloc(8); size.writeBigUInt64BE(BigInt(Buffer.byteLength(part)));
+    mac.update(size).update(part);
+  }
+  return mac.digest('hex');
+}
+// Acquire before reading bodies, not only after JSON/base64 processing.
+export function capacityGate(maximum, perAccount = 2) {
+  let active = 0; const accounts = new Map();
+  return id => {
+    const own = accounts.get(id) || 0;
+    if (active >= maximum || own >= perAccount) throw new HttpError(429, 'Há solicitações em andamento. Aguarde.', 'BUSY');
+    active++; accounts.set(id, own + 1); let released = false;
+    return () => {
+      if (released) return; released = true; active--;
+      const left = accounts.get(id) - 1;
+      if (left) accounts.set(id, left); else accounts.delete(id);
+    };
+  };
+}

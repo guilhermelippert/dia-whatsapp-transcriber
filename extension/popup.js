@@ -30,7 +30,13 @@ async function refresh() {
 for (const path of ['privacy', 'terms', 'support']) $(path).href = `${CONFIG.endpoint}/${path}`;
 $('request-form').onsubmit = event => { event.preventDefault(); run(async () => { await send('request-code', { email: $('email').value }); $('verify-form').hidden = false; $('status').textContent = 'Código enviado. Confira também o spam.'; }, event.submitter); };
 $('verify-form').onsubmit = event => { event.preventDefault(); run(async () => { await send('verify', { email: $('email').value, code: $('code').value }); $('code').value = ''; await refresh(); }, event.submitter); };
-$('save-settings').onclick = event => run(async () => { await send('save-settings', { consent: $('consent').checked, automatic: $('automatic').checked }); $('status').textContent = 'Preferências salvas. Recarregue o WhatsApp para atualizar o modo automático.'; }, event.target);
+$('save-settings').onclick = event => run(async () => {
+  const consent = $('consent').checked;
+  const automatic = consent && $('automatic').checked;
+  await send('save-settings', { consent, automatic });
+  $('automatic').checked = automatic;
+  $('status').textContent = 'Preferências salvas. Recarregue o WhatsApp para atualizar o modo automático.';
+}, event.target);
 $('refresh').onclick = () => run(refresh);
 $('trial').onclick = event => run(async () => { await send('trial'); await refresh(); }, event.target);
 for (const [id, type] of [['subscribe', 'checkout'], ['portal', 'portal']]) $(id).onclick = event => run(async () => {

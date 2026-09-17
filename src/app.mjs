@@ -3,7 +3,7 @@ import http from 'node:http';
 import { randomInt } from 'node:crypto';
 import { Store } from './store.mjs';
 import { Billing, inference, sendCode } from './providers.mjs';
-import { HttpError, emailAddress, equal, hash, hmac, token, readBody, jsonBody, serialQueue } from './security.mjs';
+import { HttpError, emailAddress, equal, hash, hmac, token, readBody, jsonBody, serialQueue, isCanonicalBase64, hmacParts, capacityGate } from './security.mjs';
 import { validateSummaryInput, validateTranscriptionInput } from './server-utils.mjs';
 import { publicPage } from './pages.mjs';
 
@@ -13,6 +13,7 @@ export function createApp(config, dependencies = {}) {
   const mail = dependencies.mail || ((email, code) => sendCode(config, email, code));
   const ai = dependencies.ai || ((kind, input) => inference(config, kind, input));
   const serial = serialQueue();
+  const acquireCapacity = capacityGate(config.concurrency);
   const view = a => ({ id: a.id, email: a.email, ...store.entitlement(a), trialUsed: a.trialUsed, trialEnd: a.trialEnd,
     trialDays: config.trialDays, used: store.used(a.id), limit: config.freeLimit, billingStatus: a.billingStatus, cancelAtPeriodEnd: a.cancelAtPeriodEnd || false,
     resetsAt: Date.UTC(new Date(store.clock()).getUTCFullYear(), new Date(store.clock()).getUTCMonth() + 1, 1) });
@@ -24,7 +25,7 @@ export function createApp(config, dependencies = {}) {
       ...(config.production ? { 'Strict-Transport-Security': 'max-age=31536000; includeSubDomains' } : {}),
       ...(allowed && origin ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' } : {}) };
     const reply = (status, body) => { if (!res.destroyed) { res.writeHead(status, headers); res.end(JSON.stringify(body)); } };
-    let reserved = null;
+    let reserved = null, releaseCapacity = null;
     try {
       if (!allowed) throw new HttpError(403, 'Origem não permitida.');
       const path = new URL(req.url, config.baseUrl).pathname;
@@ -33,11 +34,14 @@ export function createApp(config, dependencies = {}) {
       if (req.method === 'GET' && ['/', '/privacy', '/terms', '/support', '/billing/return', '/billing/cancel'].includes(path)) {
         res.writeHead(200, { ...headers, 'Content-Type': 'text/html; charset=utf-8' }); return res.end(publicPage(path, config));
       }
-      if (req.method === 'GET' && path === '/plan') return reply(200, { ...await billing.price(), trialDays: config.trialDays, freeLimit: config.freeLimit });
       // Trust only an explicitly configured reverse proxy that overwrites X-Real-IP.
       const peer = req.socket.remoteAddress;
       const ip = config.trustedProxies.includes(peer) && isIP(req.headers['x-real-ip'] || '') ? req.headers['x-real-ip'] : peer;
       const ipKey = hmac(config.encryptionKey, `ip:${ip}`);
+      if (req.method === 'GET' && path === '/plan') {
+        store.rate(`plan-ip:${ipKey}`, 30, 60000);
+        return reply(200, { ...await billing.price(), trialDays: config.trialDays, freeLimit: config.freeLimit });
+      }
       if (req.method === 'POST' && path === '/stripe/webhook') {
         const raw = await readBody(req, 1024 * 1024);
         const event = billing.webhook(raw, req.headers['stripe-signature']);
@@ -113,13 +117,20 @@ export function createApp(config, dependencies = {}) {
       const requestId = req.headers['idempotency-key'];
       if (typeof requestId !== 'string' || !/^[a-zA-Z0-9_-]{16,100}$/.test(requestId)) throw new HttpError(400, 'Idempotency-Key obrigatório.');
       store.rate(`ai:${account.id}`, config.aiRate, 60000);
+      releaseCapacity = acquireCapacity(account.id);
       const body = jsonBody(await readBody(req, path === '/transcribe' ? 34 * 1024 * 1024 : 256 * 1024));
       const kind = path.slice(1); let input;
       try { input = kind === 'transcribe' ? validateTranscriptionInput(body) : validateSummaryInput(body); }
       catch (e) { throw new HttpError(e.status || 400, e.message); }
       // The commercial service chooses the model; never honor client-supplied model IDs.
-      if (kind === 'transcribe') { input.model = config.model; if ((input.data.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(input.data) || Buffer.from(input.data, 'base64').toString('base64') !== input.data)) throw new HttpError(400, 'Áudio base64 inválido.'); }
-      const cached = store.reserve(account.id, requestId, hmac(config.encryptionKey, JSON.stringify({ kind, input })));
+      if (kind === 'transcribe') {
+        input.model = config.model;
+        if (!isCanonicalBase64(input.data)) throw new HttpError(400, 'Áudio base64 inválido.');
+      }
+      const fingerprint = hmacParts(config.encryptionKey, kind === 'transcribe'
+        ? [kind, input.format, input.language, input.model, input.data]
+        : [kind, config.summaryModel, input.text]);
+      const cached = store.reserve(account.id, requestId, fingerprint);
       if (cached) return reply(200, cached);
       reserved = [account.id, requestId];
       const result = await ai(kind, input);
@@ -131,6 +142,8 @@ export function createApp(config, dependencies = {}) {
       const status = timedOut ? 504 : e.status || 500;
       // Do not expose SDK/upstream messages, credentials, email, audio or transcripts in logs/errors.
       return reply(status, { error: timedOut ? 'O processamento demorou demais. Tente novamente.' : status < 500 ? e.message : 'Serviço temporariamente indisponível.', code: e.code || 'REQUEST_FAILED' });
+    } finally {
+      releaseCapacity?.();
     }
   });
   server.requestTimeout = 70000; server.headersTimeout = 15000; server.maxHeadersCount = 32;

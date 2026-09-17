@@ -49,3 +49,23 @@ Cancelamento no portal mantém Pro até o fim do período pago. `past_due`, `unp
 - https://docs.stripe.com/changelog
 - https://openrouter.ai/docs/guides/overview/multimodal/stt
 - https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle
+
+## Isolamento do proxy e privacidade do cache
+
+Antes de `docker compose up`, copie `.env.proxy.example` para `.env.proxy` e defina
+somente `PUBLIC_BASE_URL`, com a mesma origem HTTPS de `.env.local`. Não copie
+credenciais, `DATA_ENCRYPTION_KEY` ou o restante do ambiente do backend. O Caddy
+não necessita desses segredos. Proteja ambos os arquivos com `chmod 600`.
+
+A chave do cache de comunicações da extensão reside exclusivamente em
+`chrome.storage.session`. Ao fechar o navegador, essa chave desaparece. No próximo
+uso, o cache cifrado antigo é descartado. Reiniciar apenas o service worker não
+perde a chave. Sair, revogar o consentimento ou limpar dados também destrói o cache.
+O cache não é backup; copie resultados importantes antes de encerrar o navegador.
+
+As requisições de IA adquirem capacidade antes de ler o corpo (2 por conta,
+`GLOBAL_AI_CONCURRENCY` global), além das cotas e limites de frequência.
+`GET /plan` permite 30 consultas por IP/minuto. Consultas concorrentes de preço
+são agregadas; falhas do Stripe têm intervalo de 10 segundos antes de nova tentativa.
+O setup repara eventos ausentes no webhook existente; o preflight rejeita um
+webhook sem cobertura de todos os eventos obrigatórios.
