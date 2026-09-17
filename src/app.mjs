@@ -6,6 +6,7 @@ import { Billing, inference, sendCode } from './providers.mjs';
 import { HttpError, emailAddress, equal, hash, hmac, token, readBody, jsonBody, serialQueue, isCanonicalBase64, hmacParts, capacityGate } from './security.mjs';
 import { validateSummaryInput, validateTranscriptionInput } from './server-utils.mjs';
 import { publicPage } from './pages.mjs';
+import { Workspace, validateAssist, validateAssistResult } from './workspace.mjs';
 
 export function createApp(config, dependencies = {}) {
   const store = dependencies.store || new Store(config, dependencies.clock);
@@ -14,6 +15,7 @@ export function createApp(config, dependencies = {}) {
   const ai = dependencies.ai || ((kind, input) => inference(config, kind, input));
   const serial = serialQueue();
   const acquireCapacity = capacityGate(config.concurrency);
+  const workspace = new Workspace(store);
   const view = a => ({ id: a.id, email: a.email, ...store.entitlement(a), trialUsed: a.trialUsed, trialEnd: a.trialEnd,
     trialDays: config.trialDays, used: store.used(a.id), limit: config.freeLimit, billingStatus: a.billingStatus, cancelAtPeriodEnd: a.cancelAtPeriodEnd || false,
     resetsAt: Date.UTC(new Date(store.clock()).getUTCFullYear(), new Date(store.clock()).getUTCMonth() + 1, 1) });
@@ -102,7 +104,14 @@ export function createApp(config, dependencies = {}) {
         return reply(200, { ok: true });
       }
       if (account.deleting) throw new HttpError(409, 'Exclusão de conta em andamento.');
-      if (req.method === 'GET' && path === '/account/export') return reply(200, { account: view(account), created: account.created, usage: store.db.prepare('SELECT request_id,status,created FROM usage WHERE user_id=?').all(account.id) });
+      if (path === '/workspace') {
+        if (req.method === 'GET') return reply(200, { items: workspace.list(account.id) });
+        if (!['POST', 'DELETE'].includes(req.method)) throw new HttpError(405, 'Método não permitido.');
+        const body = jsonBody(await readBody(req, 256 * 1024));
+        if (req.method === 'POST') return reply(200, { item: workspace.save(account.id, body) });
+        workspace.remove(account.id, body); return reply(200, { ok: true });
+      }
+      if (req.method === 'GET' && path === '/account/export') return reply(200, { workspace: workspace.list(account.id), account: view(account), created: account.created, usage: store.db.prepare('SELECT request_id,status,created FROM usage WHERE user_id=?').all(account.id) });
       if (account.customer && account.synced < store.clock() - 300000) {
         await serial(account.id, () => billing.sync(account.id)); account = store.account(account.id);
       }
@@ -112,7 +121,7 @@ export function createApp(config, dependencies = {}) {
         store.rate(`billing:${account.id}`, 10, 60000);
         return reply(200, await serial(account.id, () => path.endsWith('checkout') ? billing.checkout(account.id) : billing.portal(account.id)));
       }
-      if (req.method !== 'POST' || !['/transcribe', '/summarize'].includes(path)) throw new HttpError(404, 'Rota não encontrada.');
+      if (req.method !== 'POST' || !['/transcribe', '/summarize', '/assist'].includes(path)) throw new HttpError(404, 'Rota não encontrada.');
       if (!req.headers['content-type']?.startsWith('application/json')) throw new HttpError(415, 'Envie JSON.');
       const requestId = req.headers['idempotency-key'];
       if (typeof requestId !== 'string' || !/^[a-zA-Z0-9_-]{16,100}$/.test(requestId)) throw new HttpError(400, 'Idempotency-Key obrigatório.');
@@ -120,7 +129,7 @@ export function createApp(config, dependencies = {}) {
       releaseCapacity = acquireCapacity(account.id);
       const body = jsonBody(await readBody(req, path === '/transcribe' ? 34 * 1024 * 1024 : 256 * 1024));
       const kind = path.slice(1); let input;
-      try { input = kind === 'transcribe' ? validateTranscriptionInput(body) : validateSummaryInput(body); }
+      try { input = kind === 'transcribe' ? validateTranscriptionInput(body) : kind === 'assist' ? validateAssist(body) : validateSummaryInput(body); }
       catch (e) { throw new HttpError(e.status || 400, e.message); }
       // The commercial service chooses the model; never honor client-supplied model IDs.
       if (kind === 'transcribe') {
@@ -129,11 +138,12 @@ export function createApp(config, dependencies = {}) {
       }
       const fingerprint = hmacParts(config.encryptionKey, kind === 'transcribe'
         ? [kind, input.format, input.language, input.model, input.data]
-        : [kind, config.summaryModel, input.text]);
+        : kind === 'assist' ? [kind, config.summaryModel, input.action, input.tone, input.text] : [kind, config.summaryModel, input.text]);
       const cached = store.reserve(account.id, requestId, fingerprint);
       if (cached) return reply(200, cached);
       reserved = [account.id, requestId];
-      const result = await ai(kind, input);
+      const response = await ai(kind, input);
+      const result = kind === 'assist' ? validateAssistResult(input, response) : response;
       store.finish(account.id, requestId, result); reserved = null;
       return reply(200, result);
     } catch (e) {
@@ -147,7 +157,7 @@ export function createApp(config, dependencies = {}) {
     }
   });
   server.requestTimeout = 70000; server.headersTimeout = 15000; server.maxHeadersCount = 32;
-  const cleanup = setInterval(() => store.cleanup(), 60000); cleanup.unref();
+  const cleanup = setInterval(() => { store.cleanup(); workspace.cleanup(); }, 60000); cleanup.unref();
   server.on('close', () => { clearInterval(cleanup); store.close(); });
-  return { server, store, billing };
+  return { server, store, billing, workspace };
 }

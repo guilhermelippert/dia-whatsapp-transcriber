@@ -16,7 +16,7 @@ mkdirSync('artifacts',{recursive:true});
 let browser,next=0,aiCalls=0;
 const app=createApp(loadConfig({NODE_ENV:'development',DATABASE_PATH:':memory:',DATA_ENCRYPTION_KEY:'ab'.repeat(32),STRIPE_SECRET_KEY:'sk_test_fake',STRIPE_PRICE_ID:'price_pro'}),{
   mail:async(e,c)=>codes.set(e,c),
-  ai:async(kind)=>{aiCalls++;return {text:kind==='summarize'?'Resumo: confirmar o orçamento e responder até sexta-feira.':'Oi! Você consegue me enviar o orçamento até sexta-feira? Obrigado!'};},
+  ai:async(kind,input)=>{aiCalls++;return {text:kind==='assist'&&input.action==='tasks'?JSON.stringify({tasks:[{title:'Enviar orçamento',body:'Prazo mencionado: sexta-feira.',source:'Pode enviar o orçamento até sexta-feira?'}]}):kind==='summarize'||(kind==='assist'&&input.action==='catchup')?'Resumo: confirmar o orçamento e responder até sexta-feira.':kind==='assist'?'Olá! Vou verificar o orçamento e confirmar o prazo.':'Oi! Você consegue me enviar o orçamento até sexta-feira? Obrigado!'};},
   stripe:async(p,v)=>{stripeCalls.push({p,v});if(p.startsWith('/prices/'))return {active:true,type:'recurring',recurring:{interval:'month',interval_count:1},unit_amount:2990,currency:'brl'};if(p==='/customers')return {id:'cus_demo'};if(p.startsWith('/subscriptions?'))return {data:[],has_more:false};if(p==='/checkout/sessions')return {id:'cs_demo',status:'open',url:'https://checkout.stripe.com/c/pay/demo'};throw new Error(`Unexpected fake Stripe endpoint ${p}`);}
 });
 function send(method,params={},sessionId){return new Promise((resolve,reject)=>{const id=++next,timer=setTimeout(()=>{pending.delete(id);reject(new Error(`CDP timeout: ${method}`));},30000);pending.set(id,{resolve:r=>{clearTimeout(timer);resolve(r);},reject:e=>{clearTimeout(timer);reject(e);}});browser.stdio[3].write(JSON.stringify({id,method,params,...(sessionId?{sessionId}:{})})+'\0');});}
@@ -57,16 +57,31 @@ try {
   if(productivity){
     await send('Target.activateTarget',{targetId:wa.targetId});const work=await tab(`${origin}/workspace.html`);
     await wait(()=>text(work,'#library-list','orçamento'),'library');await value(work,'#library-search','inexistente');await evaluate(work,"document.querySelector('#library-search').dispatchEvent(new Event('input'))");await wait(()=>text(work,'#library-list','Nenhum'),'search');
+    await value(work,'#library-search','');await evaluate(work,"document.querySelector('#library-search').dispatchEvent(new Event('input'))");
+    await click(work,'#storage-consent');
+    await click(work,'nav a[href="#tasks-section"]');
     await value(work,'#task-title','Responder orçamento');await value(work,'#task-due',new Date(Date.now()+3600000).toISOString().slice(0,16));await click(work,'#task-form button');await wait(()=>text(work,'#task-list','Responder orçamento'),'follow-up');
     await value(work,'#reply-title','Orçamento');await value(work,'#reply-body','Olá! Vou conferir e te retorno.');await click(work,'#reply-form button');await wait(()=>text(work,'#reply-list','Vou conferir'),'quick reply');
-    await click(work,'#digest');await wait(()=>text(work,'#digest-result','Resumo:'),'conversation digest');await screenshot(work,'productivity-workspace');
+    await click(work,'#load-conversation');await wait(()=>evaluate(work,"document.querySelector('#context').value.includes('Pode enviar o orçamento')"),'reviewable conversation capture');
+    assert.equal(aiCalls,2);
+    await click(work,'#digest');await wait(()=>evaluate(work,"document.querySelector('#digest-result').value.includes('Resumo:')"),'conversation digest');
+    await click(work,'#save-digest');await wait(()=>text(work,'#library-list','Resumo:'),'saved digest');
+    await click(work,'#extract-tasks');await wait(()=>text(work,'#extracted-tasks','Evidência:'),'task extraction');
+    await click(work,'#extracted-tasks button');await wait(()=>text(work,'#task-list','Enviar orçamento'),'reviewed task saved');
+    await click(work,'#draft-reply');await wait(()=>evaluate(work,"document.querySelector('#reply-body').value.includes('Vou verificar')"),'AI draft');
+    await screenshot(work,'productivity-actions');
+    await evaluate(work,"window.scrollTo(0,0)");await screenshot(work,'productivity-workspace');
+    await evaluate(work,"document.querySelector('#library-section').scrollIntoView()");await screenshot(work,'productivity-library');
+    await evaluate(work,"window.scrollTo(0,0)");await screenshot(work,'productivity-mobile',390,844);
+    assert.equal(await evaluate(work,"document.documentElement.scrollWidth<=window.innerWidth"),true);
+    const exported=await evaluate(work,"chrome.runtime.sendMessage({type:'workspace:init'}).then(async s=>chrome.runtime.sendMessage({type:'workspace:export',context:s.context}))");assert.equal(exported.workspace.length,4);
     await send('Page.reload',{},work.sessionId);await wait(async()=>await text(work,'#task-list','Responder orçamento')&&await text(work,'#reply-list','Vou conferir'),'workspace persistence');
   }
   await click(popup,'#trial');await wait(()=>text(popup,'#plan-name','Trial Pro'),'trial');await screenshot(popup,'popup-trial',420,1200);
   await click(popup,'#subscribe');await wait(()=>stripeCalls.some(c=>c.p==='/checkout/sessions'),'checkout');assert.equal(app.store.entitlement(app.store.accountByEmail('demo@example.test')).plan,'trial');
   await click(popup,'#logout');await wait(()=>evaluate(popup,"!document.querySelector('#login').hidden"),'logout');assert.equal(await evaluate(popup,"chrome.storage.local.get(null).then(s=>!!s.token || !!s['vault:transcripts'])"),false);
   assert.equal(errors.length,0,JSON.stringify(errors));
-  const report={passed:true,browser:binary,flows:['default-off','verified-login','consent-gate','transcription','summary','encrypted-cache','reload','server-quota','trial','checkout-not-entitlement','logout',...(productivity?['transcript-search','follow-up','quick-replies','conversation-digest','workspace-persistence']:[])],aiCalls,consoleErrors:errors.length,remaining:'Synthetic WhatsApp; external email/Stripe/OpenRouter stubbed. Real services, real WhatsApp and Google approval require production smoke.'};
+  const report={passed:true,browser:binary,flows:['default-off','verified-login','consent-gate','transcription','summary','encrypted-cache','reload','server-quota','trial','checkout-not-entitlement','logout',...(productivity?['transcript-search','follow-up','quick-replies','conversation-capture-preview','conversation-digest','task-extraction-evidence','AI-reply-draft','workspace-export','mobile-no-overflow','workspace-persistence']:[])],aiCalls,consoleErrors:errors.length,remaining:'Synthetic WhatsApp; external email/Stripe/OpenRouter stubbed. Real services, real WhatsApp and Google approval require production smoke.'};
   writeFileSync('artifacts/browser-report.json',JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
 } finally {
   if(browser){browser.stdio[3].end();browser.kill('SIGTERM');await pause(300);browser.kill('SIGKILL');}

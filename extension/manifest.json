@@ -1,17 +1,62 @@
 {
   "manifest_version": 3,
   "name": "Dia Transcriber para WhatsApp",
-  "version": "0.3.0",
-  "description": "Transcreva e resuma áudios do WhatsApp Web. Gratuito com limite e plano Pro por assinatura.",
-  "permissions": ["storage"],
-  "host_permissions": ["https://web.whatsapp.com/*", "http://127.0.0.1:43110/*"],
-  "background": {"service_worker": "background.js", "type": "module"},
-  "action": {"default_title": "Transcritor do WhatsApp", "default_popup": "popup.html", "default_icon": {"16":"icons/16.png","32":"icons/32.png","48":"icons/48.png","128":"icons/128.png"}},
+  "version": "0.4.0",
+  "description": "Transcreva áudios, resuma conversas e organize tarefas e respostas no WhatsApp. Gratuito e Pro.",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://web.whatsapp.com/*",
+    "http://127.0.0.1:43110/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Transcritor do WhatsApp",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/16.png",
+      "32": "icons/32.png",
+      "48": "icons/48.png",
+      "128": "icons/128.png"
+    }
+  },
   "content_scripts": [
-    {"matches":["https://web.whatsapp.com/*"],"js":["page-bridge.js"],"run_at":"document_start","world":"MAIN"},
-    {"matches":["https://web.whatsapp.com/*"],"js":["content.js"],"css":["content.css"],"run_at":"document_idle"}
+    {
+      "matches": [
+        "https://web.whatsapp.com/*"
+      ],
+      "js": [
+        "page-bridge.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://web.whatsapp.com/*"
+      ],
+      "js": [
+        "content.js",
+        "conversation.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    }
   ],
   "minimum_chrome_version": "120",
-  "icons": {"16":"icons/16.png","32":"icons/32.png","48":"icons/48.png","128":"icons/128.png"},
-  "content_security_policy": {"extension_pages":"script-src 'self'; object-src 'none'"}
+  "icons": {
+    "16": "icons/16.png",
+    "32": "icons/32.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'"
+  }
 }
