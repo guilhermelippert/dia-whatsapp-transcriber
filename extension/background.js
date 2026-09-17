@@ -1,4 +1,5 @@
 import { CONFIG } from './config.js';
+import { workspaceAction } from './workspace-background.js';
 import { readVault, changeVault, clearVaults } from './vault.js';
 const api = globalThis.chrome;
 const ready = (async () => {
@@ -40,10 +41,12 @@ async function contentAccess() {
 async function handle(message, sender) {
   await ready;
   if (sender.id !== api.runtime.id) throw new Error('Origem não permitida.');
+  const workspace = sender.url?.split('#')[0] === api.runtime.getURL('workspace.html');
   const popup = sender.url === api.runtime.getURL('popup.html');
   const whatsapp = Boolean(sender.tab) && sender.url?.startsWith('https://web.whatsapp.com/');
-  if (!popup && !whatsapp) throw new Error('Origem não permitida.');
+  if (!popup && !whatsapp && !workspace) throw new Error('Origem não permitida.');
   const type = message?.type;
+  if (workspace && type?.startsWith('workspace:')) return workspaceAction(message, { request, preferences, contentAccess });
   if (type === 'settings') {
     const s = await preferences(); return { consent: s.consent, automatic: s.automatic, language: s.language, loggedIn: Boolean(s.token) };
   }

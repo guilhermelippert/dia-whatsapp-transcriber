@@ -60,3 +60,5 @@ run(async () => {
   $('subscribe').textContent = `Assinar Pro por ${price}/mês`; $('subscribe').disabled = false;
   $('plan-details').textContent = `${p.freeLimit} ações/mês grátis. Pro: ${price}/mês. Trial de ${p.trialDays} dias.`;
 });
+
+$('workspace').onclick = () => run(() => api.tabs.create({ url: api.runtime.getURL('workspace.html') }));

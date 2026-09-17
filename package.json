@@ -1,6 +1,6 @@
 {
   "name": "dia-whatsapp-transcriber",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "Extensão Chromium/Dia para transcrever áudios do WhatsApp Web via OpenRouter.",
   "type": "module",
@@ -16,5 +16,7 @@
     "stripe:setup": "node scripts/setup-stripe.mjs",
     "test:browser": "node scripts/browser-test.mjs"
   },
-  "engines": { "node": ">=22.16.0 <23" }
+  "engines": {
+    "node": ">=22.16.0 <23"
+  }
 }
