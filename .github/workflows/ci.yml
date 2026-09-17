@@ -18,6 +18,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Archive exact source snapshot for reproducibility
+        run: mkdir -p artifacts && git archive --format=zip HEAD -o artifacts/source.zip
       - run: npm run build && npm run check && npm test
       - name: Browser integration (synthetic WhatsApp, stubbed providers)
         run: CHROME_BIN=$(command -v google-chrome) npm run test:browser
