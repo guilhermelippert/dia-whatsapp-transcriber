@@ -3,6 +3,7 @@ import { stripeClient } from '../src/providers.mjs';
 import { listWebhooks, webhookReady } from '../src/billing-config.mjs';
 const c = loadConfig({ NODE_ENV: 'production' });
 if (!c.stripeKey.startsWith('sk_live_')) throw new Error('Publicação comercial exige chave Stripe live. Use test no ambiente de staging.');
+if (!c.typesafeKey) throw new Error('Publicação do Dia Executive exige TYPESAFE_API_KEY para a triagem Jev anunciada.');
 for (const route of ['/health','/privacy','/terms','/support','/plan']) {
   const response = await fetch(`${c.baseUrl}${route}`, { redirect: 'error', signal: AbortSignal.timeout(10000) });
   if (!response.ok) throw new Error(`Endpoint público indisponível: ${route}`);

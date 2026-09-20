@@ -1,6 +1,6 @@
-# Dia Transcriber para WhatsApp
+# Dia Executive para WhatsApp
 
-Extensão Chromium Manifest V3 para transcrever e resumir áudios do WhatsApp Web, com backend próprio e **OpenRouter preservado**. Produto independente de WhatsApp, Meta e do navegador Dia.
+Extensão Chromium Manifest V3 que transforma o WhatsApp Web em um cockpit executivo. Transcreve áudios, resume conversas, melhora a busca e organiza tarefas, decisões, riscos, briefings, handoffs e respostas para revisão. Usa backend próprio, OpenRouter e triagem opcional Jev. Produto independente de WhatsApp, Meta e do navegador Dia.
 
 ## Modelo comercial
 

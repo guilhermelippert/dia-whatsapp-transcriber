@@ -7,12 +7,14 @@ import { HttpError, emailAddress, equal, hash, hmac, token, readBody, jsonBody, 
 import { validateSummaryInput, validateTranscriptionInput } from './server-utils.mjs';
 import { publicPage } from './pages.mjs';
 import { Workspace, validateAssist, validateAssistResult } from './workspace.mjs';
+import { jevTriage, validateTriageInput } from './triage.mjs';
 
 export function createApp(config, dependencies = {}) {
   const store = dependencies.store || new Store(config, dependencies.clock);
   const billing = dependencies.billing || new Billing(config, store, dependencies.stripe);
   const mail = dependencies.mail || ((email, code) => sendCode(config, email, code));
   const ai = dependencies.ai || ((kind, input) => inference(config, kind, input));
+  const triage = dependencies.triage || (input => jevTriage(config, input));
   const serial = serialQueue();
   const acquireCapacity = capacityGate(config.concurrency);
   const workspace = new Workspace(store);
@@ -93,9 +95,12 @@ export function createApp(config, dependencies = {}) {
         if (body.confirm !== 'EXCLUIR') throw new HttpError(400, 'Confirme a exclusão.');
         await serial(account.id, async () => {
           // Read the latest account INSIDE the customer lock: a queued checkout may have created a customer.
+          store.assertNoPendingUsage(account.id);
           const current = billing.patch(account.id, { deleting: true });
           if (current.customer) await billing.request(`/customers/${encodeURIComponent(current.customer)}`, null, `dia-delete-${account.id}`, 'DELETE');
           store.tx(() => {
+            // Keep only this month's pseudonymous count, never the deleted results.
+            store.retainMonthlyQuota(account.id);
             store.db.prepare('INSERT OR REPLACE INTO trial_claims VALUES(?,?)').run(store.emailHash(account.email), store.clock() + 180 * 86400000);
             store.db.prepare('DELETE FROM accounts WHERE id=?').run(account.id);
             store.db.prepare('DELETE FROM codes WHERE email_hash=?').run(store.emailHash(account.email));
@@ -107,7 +112,8 @@ export function createApp(config, dependencies = {}) {
       if (path === '/workspace') {
         if (req.method === 'GET') return reply(200, { items: workspace.list(account.id) });
         if (!['POST', 'DELETE'].includes(req.method)) throw new HttpError(405, 'Método não permitido.');
-        const body = jsonBody(await readBody(req, 256 * 1024));
+        // Notes allow 400,002 UTF-16 units; JSON escaping can take six bytes each.
+        const body = jsonBody(await readBody(req, req.method === 'POST' ? 3 * 1024 * 1024 : 256 * 1024));
         if (req.method === 'POST') return reply(200, { item: workspace.save(account.id, body) });
         workspace.remove(account.id, body); return reply(200, { ok: true });
       }
@@ -121,7 +127,7 @@ export function createApp(config, dependencies = {}) {
         store.rate(`billing:${account.id}`, 10, 60000);
         return reply(200, await serial(account.id, () => path.endsWith('checkout') ? billing.checkout(account.id) : billing.portal(account.id)));
       }
-      if (req.method !== 'POST' || !['/transcribe', '/summarize', '/assist'].includes(path)) throw new HttpError(404, 'Rota não encontrada.');
+      if (req.method !== 'POST' || !['/transcribe', '/summarize', '/assist', '/triage'].includes(path)) throw new HttpError(404, 'Rota não encontrada.');
       if (!req.headers['content-type']?.startsWith('application/json')) throw new HttpError(415, 'Envie JSON.');
       const requestId = req.headers['idempotency-key'];
       if (typeof requestId !== 'string' || !/^[a-zA-Z0-9_-]{16,100}$/.test(requestId)) throw new HttpError(400, 'Idempotency-Key obrigatório.');
@@ -129,7 +135,7 @@ export function createApp(config, dependencies = {}) {
       releaseCapacity = acquireCapacity(account.id);
       const body = jsonBody(await readBody(req, path === '/transcribe' ? 34 * 1024 * 1024 : 256 * 1024));
       const kind = path.slice(1); let input;
-      try { input = kind === 'transcribe' ? validateTranscriptionInput(body) : kind === 'assist' ? validateAssist(body) : validateSummaryInput(body); }
+      try { input = kind === 'transcribe' ? validateTranscriptionInput(body) : kind === 'assist' ? validateAssist(body) : kind === 'triage' ? validateTriageInput(body) : validateSummaryInput(body); }
       catch (e) { throw new HttpError(e.status || 400, e.message); }
       // The commercial service chooses the model; never honor client-supplied model IDs.
       if (kind === 'transcribe') {
@@ -138,11 +144,12 @@ export function createApp(config, dependencies = {}) {
       }
       const fingerprint = hmacParts(config.encryptionKey, kind === 'transcribe'
         ? [kind, input.format, input.language, input.model, input.data]
-        : kind === 'assist' ? [kind, config.summaryModel, input.action, input.tone, input.text] : [kind, config.summaryModel, input.text]);
+        : kind === 'assist' ? [kind, config.summaryModel, input.action, input.tone, input.text]
+          : kind === 'triage' ? [kind, config.typesafeModel, input.text] : [kind, config.summaryModel, input.text]);
       const cached = store.reserve(account.id, requestId, fingerprint);
       if (cached) return reply(200, cached);
       reserved = [account.id, requestId];
-      const response = await ai(kind, input);
+      const response = kind === 'triage' ? await triage(input) : await ai(kind, input);
       const result = kind === 'assist' ? validateAssistResult(input, response) : response;
       store.finish(account.id, requestId, result); reserved = null;
       return reply(200, result);

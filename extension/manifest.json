@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Dia Transcriber para WhatsApp",
-  "version": "0.4.0",
-  "description": "Transcreva áudios, resuma conversas e organize tarefas e respostas no WhatsApp. Gratuito e Pro.",
+  "name": "Dia Executive para WhatsApp",
+  "version": "0.5.0",
+  "description": "Transcreva, resuma e transforme conversas em tarefas, decisões, riscos, briefings e respostas revisáveis.",
   "permissions": [
     "storage"
   ],
@@ -15,7 +15,7 @@
     "type": "module"
   },
   "action": {
-    "default_title": "Transcritor do WhatsApp",
+    "default_title": "Dia Executive para WhatsApp",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/16.png",

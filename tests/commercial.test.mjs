@@ -222,3 +222,60 @@ test('delete queued behind checkout cancels newly-created Stripe customer', asyn
   assert.ok(h.stripe.calls.some(c=>c.path==='/customers/cus_test' && c.method==='DELETE'));
   assert.equal(h.store.account(u.account.id),null);
 });
+
+
+test('deleting and recreating the same email preserves monthly quota across repeated deletions', async t => {
+  const h = await httpFor(t, { env: { FREE_MONTHLY_ACTIONS: '2' } });
+  let u = await h.login();
+  const remove = async () => {
+    assert.equal((await h.request('/account', { token: u.token, method: 'DELETE', body: { confirm: 'EXCLUIR' } })).status, 200);
+    assert.equal(h.store.db.prepare('SELECT count(*) n FROM usage').get().n, 0);
+    assert.equal(h.store.account(u.account.id), null);
+  };
+  assert.equal((await h.aiRequest(u.token)).status, 200);
+  await remove(); u = await h.login();
+  assert.equal(u.account.used, 1);
+  assert.equal((await h.aiRequest(u.token)).status, 200);
+  await remove(); u = await h.login();
+  assert.equal(u.account.used, 2);
+  assert.equal((await h.aiRequest(u.token)).status, 402);
+  assert.equal(h.calls(), 2);
+  const retained = h.store.db.prepare('SELECT * FROM quota_claims').all();
+  assert.equal(retained.length, 1);
+  assert.ok(!JSON.stringify(retained).includes(u.account.email));
+  h.advance(31 * DAY); h.store.cleanup();
+  assert.equal(h.store.used(u.account.id), 0);
+  assert.equal(h.store.db.prepare('SELECT count(*) n FROM quota_claims').get().n, 0);
+  // The previous session expires after 30 days, so authenticate again next month.
+  u = await h.login();
+  assert.equal((await h.aiRequest(u.token)).status, 200);
+});
+
+test('deletion waits for inference completion so an active reservation cannot be discarded', async t => {
+  let resume, entered;
+  const gate = new Promise(r => resume = r), started = new Promise(r => entered = r);
+  const h = await httpFor(t, { ai: async () => { entered(); await gate; return { text: 'ok' }; } });
+  const u = await h.login();
+  const processing = h.aiRequest(u.token);
+  await started;
+  const removal = await h.request('/account', { token: u.token, method: 'DELETE', body: { confirm: 'EXCLUIR' } });
+  resume();
+  assert.equal(removal.status, 409);
+  assert.equal((await processing).status, 200);
+  assert.ok(!h.store.account(u.account.id).deleting);
+  assert.equal((await h.request('/account', { token: u.token, method: 'DELETE', body: { confirm: 'EXCLUIR' } })).status, 200);
+  assert.equal((await h.login()).account.used, 1);
+});
+
+test('workspace accepts full escaped notes but rejects oversized HTTP bodies without raising AI limits', async t => {
+  const h = await httpFor(t), u = await h.login();
+  const note = { id: randomUUID(), revision: 0, kind: 'note', title: 'Complete transcript', body: '\u0000'.repeat(400002) };
+  const saved = await h.request('/workspace', { token: u.token, body: note });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.item.body, note.body);
+  const oversized = await h.request('/workspace', { token: u.token, body: { ...note, padding: 'x'.repeat(3 * 1024 * 1024) } });
+  assert.equal(oversized.status, 413);
+  const summary = await h.request('/summarize', { token: u.token, body: { text: 'x'.repeat(256 * 1024) }, headers: { 'Idempotency-Key': randomUUID() } });
+  assert.equal(summary.status, 413);
+  assert.equal(h.calls(), 0);
+});
