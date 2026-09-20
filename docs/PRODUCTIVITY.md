@@ -1,13 +1,13 @@
 # Painel de produtividade (branch codex/whatsapp-productivity)
 
 Esta branch parte de `codex/chrome-store-billing`. Integre primeiro a PR comercial;
-retargete a PR de produtividade para `main` depois do merge da base. Versão 0.4.0.
+retargete a PR de produtividade para `main` depois do merge da base. Versão 0.5.0.
 
-## Quatro funcionalidades
+## Cockpit executivo
 
 1. Resumo contextual da conversa com decisões, pendências e perguntas. Abra o
    painel pelo popup, escolha uma aba, clique em Carregar e revise o trecho.
-   Só o clique em Resumir envia o texto revisado ao OpenRouter.
+   Cada ação de IA envia o trecho somente após o clique correspondente.
 2. Extração de tarefas com evidência literal validada no servidor. Edite a sugestão,
    defina um prazo opcional e salve explicitamente. Inclui tarefas manuais,
    pendentes/atrasadas/concluídas e reabertura. Não há notificação fora do painel.
@@ -16,6 +16,13 @@ retargete a PR de produtividade para `main` depois do merge da base. Versão 0.4
 4. Biblioteca com busca local sem IA, consulta a transcrições da sessão, resumos,
    tarefas e respostas salvas, exclusão individual e exportação JSON da conta,
    biblioteca e cache da sessão. Copiar preserva o conteúdo completo.
+5. Registro de decisões e radar de riscos com evidência literal, edição humana e
+   salvamento explícito.
+6. Briefing executivo de uma conversa ou de itens salvos em várias pastas, com
+   prévia integral por item e aviso quando o limite omite conteúdo.
+7. Handoff editável para delegação e rascunhos de resposta que só são copiados.
+8. Triagem Jev opcional para urgência, conflito, necessidade de resposta, categoria
+   e prioridade derivada em código, com confiança visível.
 
 ## Consentimento e limites de escopo
 
@@ -50,10 +57,11 @@ recebido é interpretado como HTML/JS. O service worker valida remetente, sessã
 
 ## Plano e testes
 
-As três ações de IA novas usam o mesmo OpenRouter, quota mensal, trial 7/14 dias,
-plano Pro sem cota mensal, controle de concorrência e idempotência. Resultados
-inválidos/falhas não cobram ações. Tarefas exigem JSON válido e evidência encontrada
-no texto enviado. O usuário não fornece modelo/chave.
+As ações generativas usam o OpenRouter. A triagem estruturada usa TypeSafe Jev.
+Todas compartilham quota mensal, trial 7/14 dias, plano Pro sem cota mensal,
+controle de concorrência e idempotência por invocação. Resultados inválidos e
+falhas não cobram ações. Tarefas, decisões e riscos exigem JSON válido e evidência
+encontrada no texto enviado. O usuário não fornece modelo ou chave.
 
 `npm run build && npm run check && npm test` cobre armazenamento, isolamento,
 criptografia, expiração, reinício, revisões, limites, cotas, exportação e contrato
@@ -62,14 +70,15 @@ busca, preview, tarefas, rascunhos, exportação, persistência e viewport estre
 WhatsApp, e-mail, cobrança e inferência são sintéticos/stubbed nesses testes: não
 substituem o smoke de produção nem aprovação da Chrome Web Store.
 
-## Ficha da loja para 0.4.0
+## Ficha da loja para 0.5.0
 
-Resumo: Transcreva áudios, resuma conversas e organize tarefas e respostas no WhatsApp.
+Resumo: Transforme áudios e conversas em resumos, tarefas, decisões, riscos e follow-ups revisáveis.
 
-Acrescente à descrição: Painel para resumir trechos revisados de conversas, extrair
-tarefas com evidências, criar rascunhos de resposta e pesquisar resultados. Salvar
-itens na biblioteca é opcional, com retenção de 90 dias. Nenhuma mensagem é enviada
-automaticamente. O escopo é somente texto já carregado e escolhido pelo usuário.
+Acrescente à descrição: cockpit para resumir trechos revisados, extrair tarefas,
+decisões e riscos com evidência, gerar briefing e handoff, classificar sinais com
+Jev, criar rascunhos e pesquisar resultados. Salvar itens na biblioteca é opcional,
+com retenção de 90 dias. Nenhuma mensagem é enviada automaticamente. O escopo é
+somente texto já carregado e escolhido pelo usuário.
 
 Declare leitura de textos selecionados/carregados mediante ação no painel, além
 dos áudios, e armazenamento de comunicações explicitamente salvas no backend.
