@@ -17,6 +17,7 @@ export function loadConfig(overrides = {}) {
     database: env.DATABASE_PATH || './data/dia.sqlite', encryptionKey: env.DATA_ENCRYPTION_KEY || '',
     openrouterKey: env.OPENROUTER_API_KEY || '', model: env.TRANSCRIPTION_MODEL || 'openai/whisper-large-v3',
     summaryModel: env.SUMMARY_MODEL || 'google/gemini-2.5-flash-lite',
+    typesafeKey: env.TYPESAFE_API_KEY || '', typesafeModel: env.TYPESAFE_MODEL || 'jev-latest',
     stripeKey: env.STRIPE_SECRET_KEY || '', stripePrice: env.STRIPE_PRICE_ID || '',
     webhookSecret: env.STRIPE_WEBHOOK_SECRET || '', stripeVersion: '2026-08-26.dahlia',
     emailKey: env.RESEND_API_KEY || '', emailFrom: env.EMAIL_FROM || '',

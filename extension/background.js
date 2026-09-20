@@ -9,15 +9,30 @@ const ready = (async () => {
   await api.storage.local.remove(['wppTranscriber.transcripts.v1', 'wppTranscriber.summaries.v1', 'endpoint', 'model']);
 })();
 async function preferences() { return api.storage.local.get({ consent: false, automatic: false, language: 'pt', token: '', accountId: '', epoch: 0 }); }
-async function request(path, body, method = body ? 'POST' : 'GET', idempotencyKey) {
+async function request(path, body, method = body ? 'POST' : 'GET', idempotencyKey, expectedSession) {
   const settings = await preferences();
-  const response = await fetch(`${CONFIG.endpoint}${path}`, {
-    method, cache: 'no-store', credentials: 'omit', redirect: 'error',
-    headers: { 'Content-Type': 'application/json', ...(settings.token ? { Authorization: `Bearer ${settings.token}` } : {}), ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}) },
-    ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(27000),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (response.status === 401 && settings.token) {
+  if (expectedSession && ['token', 'accountId', 'epoch', 'consent'].some(key => settings[key] !== expectedSession[key])) throw new Error('A sessão mudou. Atualize o painel.');
+  let response, payload, failure;
+  const delays = [0, 100, 250, 500, 1000, 2000, 4000, 8000, 16000];
+  for (let attempt = 0; attempt < delays.length; attempt++) {
+    if (delays[attempt]) await new Promise(resolve => setTimeout(resolve, delays[attempt]));
+    try {
+      response = await fetch(`${CONFIG.endpoint}${path}`, {
+        method, cache: 'no-store', credentials: 'omit', redirect: 'error',
+        headers: { 'Content-Type': 'application/json', ...(settings.token ? { Authorization: `Bearer ${settings.token}` } : {}), ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}) },
+        ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(27000),
+      });
+      payload = await response.json().catch(() => ({}));
+      const pending = response.status === 409 && payload.code === 'IN_PROGRESS' && Boolean(idempotencyKey);
+      const oneRetry = attempt === 0 && [429, 502, 503, 504].includes(response.status);
+      if (response.ok || attempt === delays.length - 1 || (!pending && !oneRetry)) break;
+    } catch (error) {
+      failure = error;
+      if (attempt === delays.length - 1) throw error;
+    }
+  }
+  if (!response) throw failure || new Error('Não foi possível acessar o serviço.');
+  if (response.status === 401 && settings.token && (await preferences()).token === settings.token) {
     await api.storage.local.remove(['token', 'accountId']); await clearLocal();
     if (path === '/auth/logout') return {};
   }
@@ -58,7 +73,8 @@ async function handle(message, sender) {
   if (whatsapp && ['transcribe', 'summarize'].includes(type)) {
     const settings = await contentAccess();
     if (message.context !== `${settings.accountId}:${settings.epoch}`) throw new Error('A sessão mudou. Recarregue o WhatsApp.');
-    const result = await request(`/${type}`, type === 'transcribe' ? { data: message.data, format: message.format, language: settings.language } : { text: message.text }, 'POST', crypto.randomUUID());
+    const body = type === 'transcribe' ? { data: message.data, format: message.format, language: settings.language } : { text: message.text };
+    const result = await request(`/${type}`, body, 'POST', crypto.randomUUID(), settings);
     const current = await contentAccess();
     if (message.context !== `${current.accountId}:${current.epoch}`) throw new Error('A sessão mudou. Recarregue o WhatsApp.');
     return result;

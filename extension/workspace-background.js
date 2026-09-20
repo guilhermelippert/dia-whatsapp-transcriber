@@ -8,10 +8,12 @@ export async function workspaceAction(message, { request, preferences, contentAc
     const after = await preferences();
     if (after.token !== before.token || `${after.accountId}:${after.epoch}` !== context) throw new Error('A sessão mudou. Atualize o painel.');
   };
+  // Every outbound call must use the identity validated above, before any side effect.
+  const sessionRequest = (path, body, method, key) => request(path, body, method, key, before);
   let result;
   switch (message.type) {
     case 'workspace:init': {
-      const { items } = await request('/workspace');
+      const { items } = await sessionRequest('/workspace');
       result = { items, cache: before.consent ? await readVault('transcripts', {}) : {}, context, consent: before.consent };
       break;
     }
@@ -31,15 +33,25 @@ export async function workspaceAction(message, { request, preferences, contentAc
     }
     case 'workspace:assist':
       await contentAccess();
-      result = await request('/assist', { action: message.action, text: message.text, tone: message.tone }, 'POST', crypto.randomUUID());
+      {
+        const body = { action: message.action, text: message.text, tone: message.tone };
+        result = await sessionRequest('/assist', body, 'POST', crypto.randomUUID());
+      }
+      await contentAccess(); break;
+    case 'workspace:triage':
+      await contentAccess();
+      {
+        const body = { text: message.text };
+        result = await sessionRequest('/triage', body, 'POST', crypto.randomUUID());
+      }
       await contentAccess(); break;
     case 'workspace:save':
       if (message.storageConsent !== true) throw new Error('Confirme o armazenamento antes de salvar.');
-      result = await request('/workspace', message.item); break;
+      result = await sessionRequest('/workspace', message.item); break;
     case 'workspace:delete':
-      result = await request('/workspace', { id: message.id, revision: message.revision }, 'DELETE'); break;
+      result = await sessionRequest('/workspace', { id: message.id, revision: message.revision }, 'DELETE'); break;
     case 'workspace:export':
-      result = { ...await request('/account/export'), localCache: before.consent ? await readVault('transcripts', {}) : {} }; break;
+      result = { ...await sessionRequest('/account/export'), localCache: before.consent ? await readVault('transcripts', {}) : {} }; break;
     default: throw new Error('Ação desconhecida.');
   }
   await verify(); return result;

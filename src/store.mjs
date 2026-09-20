@@ -15,6 +15,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY, user_id TEXT REFERENCES accounts(id) ON DELETE CASCADE, expires INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS codes(email_hash TEXT PRIMARY KEY, digest TEXT NOT NULL, expires INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS trial_claims(email_hash TEXT PRIMARY KEY, expires INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS quota_claims(email_hash TEXT PRIMARY KEY, month INTEGER NOT NULL, used INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS usage(user_id TEXT REFERENCES accounts(id) ON DELETE CASCADE, request_id TEXT, fingerprint TEXT, status TEXT, created INTEGER, result TEXT, PRIMARY KEY(user_id,request_id));
       CREATE INDEX IF NOT EXISTS usage_period ON usage(user_id,created,status);
       CREATE TABLE IF NOT EXISTS limits(key TEXT PRIMARY KEY, reset INTEGER, count INTEGER);
@@ -33,6 +34,7 @@ export class Store {
     this.db.prepare('DELETE FROM codes WHERE expires <= ?').run(now);
     this.db.prepare('DELETE FROM limits WHERE reset <= ?').run(now);
     this.db.prepare('DELETE FROM trial_claims WHERE expires <= ?').run(now);
+    this.db.prepare('DELETE FROM quota_claims WHERE month < ?').run(this.month());
     this.db.prepare('DELETE FROM events WHERE created < ?').run(now - 90 * DAY);
     this.db.prepare('DELETE FROM usage WHERE created < ?').run(now - 90 * DAY);
     this.db.prepare("DELETE FROM usage WHERE status='reserved' AND created < ?").run(now - 120000);
@@ -86,7 +88,18 @@ export class Store {
   }
   month() { const d = new Date(this.clock()); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1); }
   used(id) {
-    return this.db.prepare("SELECT count(*) AS n FROM usage WHERE user_id=? AND created>=? AND (status='done' OR (status='reserved' AND created>?))").get(id, this.month(), this.clock() - 120000).n;
+    const current = this.db.prepare("SELECT count(*) AS n FROM usage WHERE user_id=? AND created>=? AND (status='done' OR (status='reserved' AND created>?))").get(id, this.month(), this.clock() - 120000).n;
+    const prior = this.db.prepare('SELECT q.used FROM quota_claims q JOIN accounts a ON a.email_hash=q.email_hash WHERE a.id=? AND q.month=?').get(id, this.month());
+    return current + (prior?.used || 0);
+  }
+  assertNoPendingUsage(id) {
+    const pending = this.db.prepare("SELECT 1 FROM usage WHERE user_id=? AND status='reserved' AND created>?").get(id, this.clock() - 120000);
+    if (pending) throw new HttpError(409, 'Aguarde o processamento em andamento antes de excluir a conta.', 'IN_PROGRESS');
+  }
+  retainMonthlyQuota(id) {
+    const a = this.account(id), used = this.used(id);
+    if (used) this.db.prepare('INSERT INTO quota_claims VALUES(?,?,?) ON CONFLICT(email_hash) DO UPDATE SET month=excluded.month,used=excluded.used')
+      .run(this.emailHash(a.email), this.month(), used);
   }
   reserve(id, requestId, fingerprint) {
     return this.tx(() => {
