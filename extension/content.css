@@ -4,13 +4,16 @@
   z-index: 2147483647;
   pointer-events: auto;
   box-sizing: border-box;
-  inline-size: min(var(--wpp-transcriber-width, 320px), calc(100% - 12px));
+  --wpp-action-color: #006c4c;
+  inline-size: min(var(--wpp-transcriber-width, 320px), 100%);
   max-inline-size: calc(100vw - 40px);
   margin-block: 6px 3px;
-  margin-inline: 0;
+  margin-inline: 0 auto;
   font: 500 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: #111b21;
 }
+
+.wpp-transcriber[data-direction="outgoing"] { margin-inline: auto 0; }
 
 .wpp-transcriber__announcement {
   position: absolute;
@@ -49,7 +52,7 @@
   padding: 5px 10px;
   border: 0;
   border-radius: 7px;
-  color: #006c4c;
+  color: var(--wpp-action-color);
   background: transparent;
   font: inherit;
   font-size: 11px;
@@ -100,12 +103,13 @@
 .wpp-transcriber[data-state="loading"] .wpp-transcriber__text { color: #667781; }
 .wpp-transcriber[data-state="error"] .wpp-transcriber__result { border-left-color: #d9485f; color: #8b1e2d; }
 .wpp-transcriber[data-direction="outgoing"][data-state="error"] .wpp-transcriber__result { border-right-color: #d9485f; }
-.wpp-transcriber__copy { display: none; position: static; flex: 0 0 auto; min-block-size: 28px; padding: 4px 8px; border: 0; border-radius: 6px; background: transparent; color: #006c4c; font: inherit; font-size: 11px; font-weight: 650; white-space: nowrap; cursor: pointer; }
+.wpp-transcriber__copy { display: none; position: static; flex: 0 0 auto; min-block-size: 28px; padding: 4px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--wpp-action-color); font: inherit; font-size: 11px; font-weight: 650; white-space: nowrap; cursor: pointer; }
 .wpp-transcriber__copy:hover { background: rgba(0, 168, 132, 0.12); }
 .wpp-transcriber[data-state="success"] .wpp-transcriber__copy { display: block; }
 
 @media (prefers-color-scheme: dark) {
-  .wpp-transcriber { color: #e9edef; }
+  .wpp-transcriber { --wpp-action-color: #80f5ce; color: #e9edef; }
+  .wpp-transcriber[data-state="error"] .wpp-transcriber__result { color: #ffb4be; }
   .wpp-transcriber__result { background: rgba(32, 44, 51, 0.96); }
   .wpp-transcriber__actions { border-block-end-color: rgba(233, 237, 239, 0.1); }
   .wpp-transcriber[data-direction="outgoing"] .wpp-transcriber__result { background: rgba(0, 92, 75, 0.96); }

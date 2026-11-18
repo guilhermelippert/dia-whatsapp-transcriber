@@ -105,27 +105,26 @@
   }
 
   function findPanelLayout(target, message) {
-    let previous = target;
-    let node = target.parentElement;
-    while (node && node !== message && message?.contains(node)) {
-      const style = getComputedStyle(node);
-      const alignedColumn = style.display === "flex"
-        && style.flexDirection === "column"
-        && (style.alignItems === "flex-start" || style.alignItems === "flex-end");
-      if (alignedColumn && node.getBoundingClientRect().width > previous.getBoundingClientRect().width + 80) {
-        return {
-          host: node,
-          width: previous.getBoundingClientRect().width,
-          direction: style.alignItems === "flex-end" ? "outgoing" : "incoming",
-        };
+    let bubble = target;
+    let candidate;
+    for (let host = target.parentElement; host && message.contains(host); host = host.parentElement) {
+      const style = getComputedStyle(host);
+      const alignment = style.alignItems;
+      const column = style.display === "flex" && style.flexDirection === "column";
+      const side = host.matches(".message-out") ? "outgoing" : host.matches(".message-in") ? "incoming" : null;
+      const end = ["flex-end", "end", "flow-end"].includes(alignment);
+      const start = ["flex-start", "start", "flow-start"].includes(alignment);
+      if (side || (column && (start || end))) {
+        const layout = { host, bubble, direction: side || (end ? "outgoing" : "incoming") };
+        if (side || host.classList.contains("focusable-list-item")) return layout;
+        candidate = layout;
       }
-      previous = node;
-      node = node.parentElement;
+      bubble = host;
     }
-    return {
+    return candidate || {
       host: message,
-      width: Math.min(message?.getBoundingClientRect().width || 320, 360),
-      direction: "incoming",
+      bubble: null,
+      direction: message.dataset.id.startsWith("true_") ? "outgoing" : "incoming",
     };
   }
 
@@ -204,7 +203,12 @@
     panel.dataset.state = "idle";
     panel.dataset.direction = layout.direction;
     panel.dataset.view = "transcript";
-    panel.style.setProperty("--wpp-transcriber-width", `${Math.max(220, Math.round(layout.width))}px`);
+    // The audio bubble can resize when the chat sidebar or the viewport changes.
+    const syncWidth = () => {
+      const width = layout.bubble?.getBoundingClientRect().width;
+      if (width > 0) panel.style.setProperty("--wpp-transcriber-width", `${width}px`);
+    };
+    syncWidth();
     panel.innerHTML = `
       <span class="wpp-transcriber__announcement" aria-live="polite"></span>
       <div class="wpp-transcriber__result" role="region" aria-label="Transcrição do áudio">
@@ -241,7 +245,9 @@
     function updateSummaryAction() {
       summaryButton.style.display = summaryText || provider === "openrouter" ? "" : "none";
     }
-    mounted.set(message, { panel, isCurrent, updateSummaryAction });
+    const resize = layout.bubble && new ResizeObserver(syncWidth);
+    resize?.observe(layout.bubble);
+    mounted.set(message, { panel, isCurrent, updateSummaryAction, resize });
     updateSummaryAction();
 
     function showTranscript() {
@@ -384,6 +390,7 @@
     if (!cacheReady) return;
     for (const [message, binding] of mounted) {
       if (binding.isCurrent()) continue;
+      binding.resize?.disconnect();
       binding.panel.remove();
       mounted.delete(message);
     }

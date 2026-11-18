@@ -10,11 +10,15 @@
       .phone { width: min(440px, calc(100vw - 32px)); padding: 38px 20px; background: #efeae2; }
       [data-id] { width: 100%; }
       [data-id] + [data-id] { margin-top: 18px; }
-      .message-column { display: flex; flex-direction: column; width: 100%; }
-      .message-column.incoming { align-items: flex-start; }
-      .message-column.outgoing { align-items: flex-end; }
-      .audio-bubble { box-sizing: border-box; width: 330px; padding: 10px 8px 6px; border-radius: 9px; background: white; box-shadow: 0 1px 1px rgba(0,0,0,.08); }
-      .outgoing .audio-bubble { border-radius: 9px 0 9px 9px; background: #d9fdd3; }
+      .message-in { width: 100%; }
+      .focusable-list-item { display: flex; flex-direction: column; align-items: flex-end; padding-inline: 24px; }
+      .audio-bubble { box-sizing: border-box; width: min(310px, 100%); padding: 10px 8px 6px; border-radius: 9px; background: white; box-shadow: 0 1px 1px rgba(0,0,0,.08); }
+      .focusable-list-item .audio-bubble { width: min(330px, 100%); border-radius: 9px 0 9px 9px; background: #d9fdd3; }
+      @media (prefers-color-scheme: dark) {
+        body, .phone { background: #0b141a; }
+        .message-in .audio-bubble { background: #202c33; }
+        .focusable-list-item .audio-bubble { background: #005c4b; }
+      }
       audio { width: 100%; height: 38px; }
       .voice-button { width: 42px; height: 42px; border: 0; border-radius: 50%; color: white; background: #00a884; cursor: pointer; }
       .hint { margin-top: 24px; color: #667781; font-size: 12px; text-align: center; }
@@ -24,8 +28,8 @@
   </head>
   <body>
     <main class="phone">
-      <div data-id="fixture-message"><div class="message-column incoming"><div class="audio-bubble"><audio controls src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA="></audio></div></div></div>
-      <div data-id="fixture-voice-message"><div class="message-column outgoing"><div class="audio-bubble"><button class="voice-button" type="button" aria-label="Play voice message">▶</button></div></div></div>
+      <div data-id="fixture-message"><div class="message-in"><div class="copyable-text audio-bubble"><audio controls src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA="></audio></div></div></div>
+      <div data-id="fixture-voice-message"><div class="focusable-list-item"><div class="copyable-text audio-bubble" data-testid="msg-container"><button class="voice-button" type="button" aria-label="Play voice message">▶</button></div></div></div>
       <p class="hint">Fixture visual de transcrição automática</p>
       <div class="fixture-actions">
         <button id="add-audio" type="button">Adicionar áudio novo</button>
@@ -79,7 +83,7 @@
         const sequence = document.querySelectorAll('[data-id^="fixture-new-"]').length + 1;
         const message = document.createElement("div");
         message.dataset.id = `fixture-new-${sequence}`;
-        message.innerHTML = '<div class="message-column incoming"><div class="audio-bubble"><button class="voice-button" type="button" aria-label="Play voice message">▶</button></div></div>';
+        message.innerHTML = '<div class="message-in"><div class="copyable-text audio-bubble"><button class="voice-button" type="button" aria-label="Play voice message">▶</button></div></div>';
         document.querySelector(".hint").before(message);
       });
       document.querySelector("#rerender-audio").addEventListener("click", () => {
@@ -90,7 +94,7 @@
         previous.remove();
         const replacement = document.createElement("div");
         replacement.dataset.id = id;
-        replacement.innerHTML = '<div class="message-column incoming"><div class="audio-bubble"><button class="voice-button" type="button" aria-label="Play voice message">▶</button></div></div>';
+        replacement.innerHTML = '<div class="message-in"><div class="copyable-text audio-bubble"><button class="voice-button" type="button" aria-label="Play voice message">▶</button></div></div>';
         document.querySelector(".hint").before(replacement);
       });
       const models = new Map();
