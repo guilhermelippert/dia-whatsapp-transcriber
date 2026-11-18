@@ -53,3 +53,41 @@ jobs:
           node-version: '22'
       - run: npm run check
       - run: node --test tests/setup.test.mjs
+
+  release:
+    name: Publicar ZIPs no GitHub
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [check, setup]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+      - name: Publicar quando a versão mudar
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          previous=$(git show HEAD^:package.json | node -p 'JSON.parse(require("node:fs").readFileSync(0)).version')
+          if [ "$version" = "$previous" ]; then
+            exit 0
+          fi
+
+          tag="v$version"
+          if gh release view "$tag" --json tagName,isDraft,assets > "$RUNNER_TEMP/transcriber-release.json" 2>/dev/null; then
+            published_commit=$(git ls-remote origin "refs/tags/$tag" | cut -f1)
+            test "$published_commit" = "$GITHUB_SHA"
+            jq -e '.isDraft == false and ([.assets[].name] | sort == ["whatsapp-transcriber-extension.zip", "whatsapp-transcriber-setup.zip"])' "$RUNNER_TEMP/transcriber-release.json"
+            exit 0
+          fi
+
+          npm run package:release
+          gh release create "$tag" dist/whatsapp-transcriber-setup.zip dist/whatsapp-transcriber-extension.zip \
+            --target "$GITHUB_SHA" --generate-notes --title "WhatsApp Transcriber $version"
