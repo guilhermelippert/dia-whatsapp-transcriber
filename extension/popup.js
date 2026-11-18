@@ -3,28 +3,41 @@ const statusCard = document.querySelector(".status");
 const statusTitle = statusCard.querySelector("strong");
 const statusText = statusCard.querySelector("p");
 const model = document.querySelector("#model");
-
-async function load() {
-  const saved = await api.storage.local.get({ model: "openai/whisper-large-v3" });
-  model.value = saved.model;
-  await checkHealth();
-}
+const save = document.querySelector("#save");
+const cloudSettings = document.querySelector("#cloud-settings");
 
 async function checkHealth() {
   statusCard.dataset.state = "loading";
   statusTitle.textContent = "Verificando serviço…";
-  statusText.textContent = "O serviço local protege sua chave.";
-  const response = await api.runtime.sendMessage({ type: "health" });
-  statusCard.dataset.state = response?.ok ? "ok" : "error";
-  statusTitle.textContent = response?.ok ? "Pronto para transcrever" : "Serviço local desligado";
-  statusText.textContent = response?.ok ? "OpenRouter conectado via localhost." : "Execute npm start na pasta do projeto.";
+  statusText.textContent = "Consultando o serviço neste computador.";
+  cloudSettings.hidden = save.hidden = true;
+  try {
+    const health = await api.runtime.sendMessage({ type: "health" });
+    if (!health?.ok) throw new Error(health?.error || "Execute npm start na pasta do projeto.");
+    if (!["local", "openrouter"].includes(health.provider)) {
+      throw new Error("Reinicie o serviço usando a versão atual do projeto.");
+    }
+    const local = health.provider === "local";
+    statusCard.dataset.state = "ok";
+    statusTitle.textContent = local ? "Whisper local" : "OpenRouter";
+    statusText.textContent = local
+      ? "O áudio é processado neste computador. Resumos online estão desativados."
+      : "As notas de voz visíveis são enviadas ao OpenRouter. Resumir envia o texto ao mesmo serviço.";
+    cloudSettings.hidden = save.hidden = local;
+  } catch (error) {
+    statusCard.dataset.state = "error";
+    statusTitle.textContent = "Serviço indisponível";
+    statusText.textContent = error.message;
+  }
 }
 
-document.querySelector("#save").addEventListener("click", async () => {
+save.addEventListener("click", async () => {
   await api.storage.local.set({ model: model.value });
-  const button = document.querySelector("#save");
-  button.textContent = "Salvo";
-  setTimeout(() => { button.textContent = "Salvar"; }, 1_200);
+  save.textContent = "Salvo";
+  setTimeout(() => { save.textContent = "Salvar"; }, 1200);
 });
 document.querySelector("#retry").addEventListener("click", checkHealth);
-load();
+api.storage.local.get({ model: "openai/whisper-large-v3" }).then((saved) => {
+  model.value = saved.model;
+});
+checkHealth();

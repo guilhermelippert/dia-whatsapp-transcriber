@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Transcrever áudio do WhatsApp",
-  "version": "0.2.0",
-  "description": "Transcreve e resume notas de voz do WhatsApp Web no Dia.",
+  "version": "0.3.0",
+  "description": "Transcreve notas de voz do WhatsApp Web sem reproduzi-las, com Whisper local ou OpenRouter.",
   "permissions": ["storage"],
   "host_permissions": [
     "https://web.whatsapp.com/*",

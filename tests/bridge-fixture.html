@@ -1,65 +1,191 @@
 <!doctype html>
-<html lang="pt-BR">
-  <head>
-    <meta charset="utf-8">
-    <title>Fixture do page bridge</title>
-  </head>
-  <body>
-    <main>
-      <h1>Fixture do page bridge</h1>
-      <output id="bridge-result">Executando…</output>
-    </main>
-    <script src="../extension/page-bridge.js"></script>
-    <script>
-      const output = document.querySelector("#bridge-result");
-      const wavHeader = new Uint8Array([
-        82, 73, 70, 70, 36, 0, 0, 0, 87, 65, 86, 69,
-        102, 109, 116, 32, 16, 0, 0, 0, 1, 0, 1, 0,
-        64, 31, 0, 0, 64, 31, 0, 0, 1, 0, 8, 0,
-        100, 97, 116, 97, 0, 0, 0, 0,
-      ]);
-      const blob = new Blob([wavHeader], { type: "audio/wav" });
-      const url = URL.createObjectURL(blob);
-      const expectedBase64 = btoa(String.fromCharCode(...wavHeader));
-      const results = {};
+<meta charset="utf-8">
+<title>Regressão da transcrição silenciosa</title>
+<output id="bridge-result">Executando…</output>
+<main></main>
+<script type="module">
+  const isolatedExtension = location.search === "?extension";
+  const runId = crypto.randomUUID();
+  let docId;
+  const output = document.querySelector("output");
+  const rows = document.querySelector("main");
+  const models = new Map();
+  const mediaCache = new Map();
+  const downloads = [];
+  const expected = [];
+  let clicks = 0;
+  let provider = "local";
+  async function setProvider(value) {
+    provider = value;
+    if (isolatedExtension) await fetch("/provider/" + docId, { method: "POST", body: value });
+    window.dispatchEvent(new Event("focus"));
+  }
+  rows.addEventListener("click", event => {
+    if (event.target.closest(".voice")) clicks++;
+  });
 
-      window.addEventListener("message", (event) => {
-        const message = event.data;
-        if (
-          event.source !== window
-          || message?.source !== "wpp-transcriber"
-          || message.direction !== "from-page"
-          || message.type !== "result"
-        ) return;
+  function assert(value, reason) {
+    if (!value) throw new Error(reason);
+  }
+  function row(id) {
+    const el = document.createElement("section");
+    if (id) el.dataset.id = id;
+    el.innerHTML = '<div role="row"><div class="voice" role="button" aria-label="Reproduzir mensagem de voz"></div></div>';
+    rows.append(el);
+    return el;
+  }
+  function audio(id, sample) {
+    // 8-bit mono WAV with one synthetic sample and a padding byte.
+    const header = atob("UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQEAAAA=");
+    const binary = header + String.fromCharCode(sample, 0);
+    const blob = new Blob([Uint8Array.from(binary, c => c.charCodeAt(0))], { type: "audio/wav" });
+    const model = { id: { _serialized: id }, type: "ptt", mediaData: {} };
+    models.set(id, model);
+    return { model, blob, payload: btoa(binary) };
+  }
+  const store = {
+    get: id => models.get(id),
+    getMessagesById: async () => ({ messages: [] }),
+  };
+  window.require = name => {
+    if (name === "WAWebCollections") return { Msg: store };
+    if (name === "WAWebMediaInMemoryBlobCache") return { InMemoryMediaBlobCache: mediaCache };
+    throw new Error(name);
+  };
 
-        results[message.requestId] = message;
-        if (!results.found || !results.missing) return;
+  async function wait(check, reason) {
+    const start = performance.now();
+    while (!check()) {
+      if (performance.now() - start > 6000) {
+        const states = Array.from(rows.children, el => [el.dataset.id, el.querySelector(".wpp-transcriber")?.dataset.state]);
+        throw new Error(reason + " " + JSON.stringify(states));
+      }
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+  }
+  async function success(el, item) {
+    await wait(() => el.querySelector('[data-state="success"] .wpp-transcriber__text')?.textContent === item.payload,
+      "Transcrição incorreta para " + el.dataset.id);
+  }
+  async function failed(el) {
+    await wait(() => el.querySelector('[data-state="error"]'), "Deveria falhar para " + el.dataset.id);
+  }
 
-        const passed = results.found.data === expectedBase64
-          && results.found.mime === "audio/wav"
-          && results.found.size === wavHeader.byteLength
-          && results.missing.error === "BLOB_NOT_FOUND";
-        output.dataset.state = passed ? "success" : "error";
-        output.textContent = passed
-          ? "Bridge capturou e devolveu o Blob corretamente."
-          : `Falha: ${JSON.stringify(results)}`;
-      });
+  async function run() {
+    if (isolatedExtension) {
+      await wait(() => document.documentElement.dataset.fixtureDocument, "Documento da extensão indisponível");
+      docId = document.documentElement.dataset.fixtureDocument;
+    }
+    const a = audio(`false_a@c.us_${runId}SAME`, 1);
+    const b = audio(`false_b@c.us_${runId}SAME`, 2);
+    a.model.mediaObject = { filehash: "hash-a" };
+    mediaCache.set("hash-a", a.blob);
+    b.model.downloadMedia = async function () {
+      downloads.push(this.id._serialized);
+      this.mediaData.mediaBlob = { forceToBlob: () => b.blob };
+    };
+    const first = row(a.model.id._serialized);
+    first.querySelector(".voice").setAttribute("aria-label", "Baixar mensagem de voz");
+    const second = row(b.model.id._serialized);
+    const noId = row();
+    const mismatched = row(`false_c@c.us_${runId}SAME`);
+    models.set(mismatched.dataset.id, b.model);
+    const missing = row(`false_d@c.us_${runId}SAME`);
+    const image = row(`false_e@c.us_${runId}SAME`);
+    models.set(image.dataset.id, { ...b.model, id: image.dataset.id, type: "image" });
+    const unsupported = row(`false_f@c.us_${runId}SAME`);
+    const unsuitable = audio(unsupported.dataset.id, 4);
+    unsuitable.model.mediaData.mediaBlob = new Blob(["invalid"], { type: "video/mp4" });
+    const noMethod = row(`false_h@c.us_${runId}SAME`);
+    audio(noMethod.dataset.id, 9);
+    const oversize = row(`false_g@c.us_${runId}SAME`);
+    models.set(oversize.dataset.id, { ...b.model, id: oversize.dataset.id, size: 24 * 1024 * 1024 + 1 });
 
-      window.postMessage({
-        source: "wpp-transcriber",
-        direction: "to-page",
-        type: "wpp-transcriber:read",
-        requestId: "found",
-        url,
-      }, "*");
+    if (!isolatedExtension) {
+      window.browser = { runtime: { sendMessage: async m => {
+        if (m.type === "health") return { ok: true, provider };
+        if (m.type === "summarize") return { ok: true, text: "Resumo sintético" };
+        return { ok: true, text: m.data };
+      } } };
+      await import("../extension/page-bridge.js");
+      await import("../extension/content.js");
+    }
+    await success(first, a);
+    await success(second, b);
+    expected.push(a.payload, b.payload);
+    for (const el of [missing, mismatched, image, unsupported, noMethod, oversize]) await failed(el);
+    assert(!noId.querySelector(".wpp-transcriber"), "Mensagem sem ID aceita");
 
-      window.postMessage({
-        source: "wpp-transcriber",
-        direction: "to-page",
-        type: "wpp-transcriber:read",
-        requestId: "missing",
-        url: "blob:http://127.0.0.1:43111/inexistente",
-      }, "*");
-    </script>
-  </body>
-</html>
+    // Reuse the very same row and control while the exact message download is pending.
+    const pending = audio(`false_a@c.us_${runId}PENDING`, 5);
+    const replacement = audio(`true_b@c.us_${runId}NEW`, 6);
+    replacement.model.mediaData.mediaBlob = replacement.blob;
+    let finish;
+    pending.model.downloadMedia = () => new Promise(resolve => { finish = () => resolve(pending.blob); });
+    first.dataset.id = pending.model.id._serialized;
+    await wait(() => finish, "Download pendente não iniciado");
+    first.dataset.id = replacement.model.id._serialized;
+    finish();
+    await success(first, replacement);
+    expected.push(replacement.payload);
+
+    second.remove();
+    await success(row(b.model.id._serialized), b);
+    const retry = audio(missing.dataset.id, 8);
+    retry.model.mediaData.mediaBlob = retry.blob;
+    missing.querySelector(".wpp-transcriber__button").click();
+    await success(missing, retry);
+    expected.push(retry.payload);
+    for (const kind of ["data", "blob", "wrong-hash", "view-once", "https"]) {
+      const id = `false_direct@c.us_${runId}${kind}`;
+      const item = audio(id, expected.length + 10);
+      const digest = await crypto.subtle.digest("SHA-256", await item.blob.arrayBuffer());
+      item.model.filehash = btoa(String.fromCharCode(...new Uint8Array(digest)));
+      item.model.downloadMedia = async () => undefined;
+      if (kind === "wrong-hash") item.model.filehash = btoa("x".repeat(32));
+      if (kind === "view-once") item.model.isViewOnce = true;
+      const owner = row(id);
+      const player = document.createElement("audio");
+      player.preload = "none";
+      player.src = kind === "https" ? "https://invalid.example/audio.wav"
+        : kind === "blob" ? URL.createObjectURL(item.blob) : "data:audio/wav;base64," + item.payload;
+      owner.replaceChildren(player);
+      if (kind === "data" || kind === "blob") {
+        await success(owner, item);
+        expected.push(item.payload);
+      } else {
+        await failed(owner);
+      }
+      if (kind === "blob") URL.revokeObjectURL(player.src);
+    }
+    const summary = el => el.querySelector(".wpp-transcriber__summary");
+    const visible = el => getComputedStyle(summary(el)).display !== "none";
+    assert(!visible(first) && !visible(missing), "Resumo disponível em modo local");
+    await setProvider("openrouter");
+    await wait(() => visible(first), "Resumo indisponível em modo online");
+    summary(first).click();
+    await wait(() => first.querySelector('[data-view="summary"]'), "Resumo online ausente");
+    await setProvider("local");
+    await wait(() => !visible(missing), "Resumo online ainda disponível em modo local");
+    assert(visible(first), "Resumo salvo inacessível");
+    summary(first).click();
+    await success(first, replacement);
+    summary(first).click();
+    await wait(() => first.querySelector(".wpp-transcriber__text").textContent === "Resumo sintético",
+      "Falha ao reabrir resumo salvo");
+    first.remove();
+    const restored = row(replacement.model.id._serialized);
+    await success(restored, replacement);
+    assert(visible(restored), "Resumo salvo oculto ao remontar a mensagem local");
+    summary(restored).click();
+    assert(restored.querySelector(".wpp-transcriber__text").textContent === "Resumo sintético", "Resumo salvo perdido");
+    assert(downloads.length === 1 && downloads[0] === b.model.id._serialized, "Download indevido");
+    assert(clicks === 0, "Controle de voz acionado");
+    if (isolatedExtension) window.checkSilentAPIs();
+  }
+  let error;
+  try { await run(); } catch (e) { error = e.message; }
+  output.dataset.state = error ? "error" : "success";
+  output.textContent = error || "Fluxo silencioso validado.";
+  if (isolatedExtension) await fetch("/result/" + docId, { method: "POST", body: JSON.stringify({ expected, error }) });
+</script>
