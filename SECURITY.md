@@ -1,6 +1,6 @@
 # Segurança
 
-Envie o relato pelo formulário privado do GitHub. [Relatar uma vulnerabilidade](https://github.com/guilhermelippert/dia-whatsapp-transcriber/security/advisories/new)
+Envie o relato pelo formulário privado do GitHub. [Relatar uma vulnerabilidade](https://github.com/guilhermelippert/whatsapp-transcriber/security/advisories/new)
 
 No relato privado, informe a versão ou o commit afetado, o navegador, o
 impacto observado e os passos para reproduzir com uma conversa fictícia.

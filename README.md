@@ -11,8 +11,8 @@ Você precisa de Node.js 22 ou superior e de um navegador Chromium com suporte a
 1. Baixe o projeto e crie sua configuração local.
 
    ```sh
-   git clone https://github.com/guilhermelippert/dia-whatsapp-transcriber.git
-   cd dia-whatsapp-transcriber
+   git clone https://github.com/guilhermelippert/whatsapp-transcriber.git
+   cd whatsapp-transcriber
    cp .env.example .env.local
    ```
 
