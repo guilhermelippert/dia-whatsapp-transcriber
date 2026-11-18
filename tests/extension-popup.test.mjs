@@ -105,8 +105,10 @@ test("popup real autoriza, persiste após reabrir e revoga com o serviço indisp
           return;
         }
         check(button.textContent.includes("Revogar"), "Autorização perdida ao reabrir");
+        const retry = document.querySelector("#retry");
+        await wait(() => !retry.disabled);
         await fetch(origin + "/offline");
-        document.querySelector("#retry").click();
+        retry.click();
         await wait(() => document.querySelector(".status").dataset.state === "error");
         check(!button.disabled, "Revogação indisponível offline");
         button.click();

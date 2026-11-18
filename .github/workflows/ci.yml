@@ -24,6 +24,7 @@ jobs:
       - name: Test with Chrome for Testing
         env:
           HELIUM_BINARY: ${{ steps.browser.outputs.chrome-path }}
+          TEST_EXTENSION_LONG_RESPONSE: "1"
         run: |
           test -x "$HELIUM_BINARY"
           npm test
