@@ -1,6 +1,6 @@
 const api = globalThis.browser || globalThis.chrome;
+const endpoint = "http://127.0.0.1:43110";
 const DEFAULT_SETTINGS = {
-  endpoint: "http://127.0.0.1:43110",
   model: "openai/whisper-large-v3",
   language: "pt",
 };
@@ -20,9 +20,8 @@ async function readResponse(response) {
 async function handleMessage(message, sender) {
   if (message?.type === "health") {
     try {
-      const { endpoint } = await getSettings();
-      await readResponse(await fetch(`${endpoint}/health`, { cache: "no-store" }));
-      return { ok: true };
+      const health = await readResponse(await fetch(`${endpoint}/health`, { cache: "no-store" }));
+      return { ok: true, provider: health.provider, model: health.model };
     } catch (error) {
       return { ok: false, error: error.message };
     }
@@ -34,17 +33,15 @@ async function handleMessage(message, sender) {
   }
 
   try {
-    const { endpoint, model, language } = await getSettings();
-    const payload = await readResponse(await fetch(
-      `${endpoint}/${message.type === "summarize" ? "summarize" : "transcribe"}`,
-      {
+    const { model, language } = await getSettings();
+    const body = message.type === "summarize"
+      ? { text: message.text }
+      : { data: message.data, format: message.format, model, language };
+    const payload = await readResponse(await fetch(`${endpoint}/${message.type}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(message.type === "summarize"
-        ? { text: message.text }
-        : { data: message.data, format: message.format, model, language }),
-      },
-    ));
+      body: JSON.stringify(body),
+    }));
     return { ok: true, text: payload.text, usage: payload.usage };
   } catch (error) {
     return {

@@ -1,7 +1,7 @@
 const FORMATS = new Set(["ogg", "webm", "mp3", "m4a", "wav", "flac", "aac"]);
 const MAX_BASE64_LENGTH = 32 * 1024 * 1024;
 const MAX_SUMMARY_LENGTH = 200_000;
-const EXTENSION_ORIGIN = /^(chrome|moz)-extension:\/\/[a-z0-9-]+$/i;
+export const EXTENSION_ORIGIN = /^(?:chrome-extension:\/\/[a-p]{32}|moz-extension:\/\/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/;
 
 export function parseEnvFile(source) {
   const result = {};
@@ -20,8 +20,8 @@ export function parseEnvFile(source) {
   return result;
 }
 
-export function isTrustedBrowserOrigin(origin) {
-  return !origin || EXTENSION_ORIGIN.test(origin);
+export function isTrustedBrowserOrigin(origin, origins) {
+  return typeof origin === "string" && EXTENSION_ORIGIN.test(origin) && origins.has(origin);
 }
 
 export function validateTranscriptionInput(input) {
@@ -32,12 +32,16 @@ export function validateTranscriptionInput(input) {
     error.status = 413;
     throw error;
   }
-  const format = String(input.format || "").toLowerCase();
+  if (input.data.length % 4 || /[^A-Za-z0-9+/=]/.test(input.data)
+      || input.data.slice(0, -2).includes("=") || /=[^=]$/.test(input.data)) {
+    throw new Error("Áudio em base64 inválido.");
+  }
+  const format = typeof input.format === "string" ? input.format.toLowerCase() : "";
   if (!FORMATS.has(format)) throw new Error("Formato de áudio não suportado.");
   return {
     data: input.data,
     format,
-    language: /^[a-z]{2}$/.test(input.language) ? input.language : "pt",
+    language: typeof input.language === "string" && /^[a-z]{2}$/.test(input.language) ? input.language : "pt",
     model: typeof input.model === "string" && input.model ? input.model : "openai/whisper-large-v3",
   };
 }
@@ -64,8 +68,7 @@ export function extractChatCompletionText(payload) {
   return content.trim();
 }
 
-export function mapOpenRouterError(status, payload = {}) {
-  const detail = payload?.error?.message || payload?.message;
+export function mapOpenRouterError(status) {
   const messages = {
     401: "A chave do OpenRouter é inválida ou foi revogada.",
     402: "A conta do OpenRouter está sem créditos disponíveis.",
@@ -76,6 +79,6 @@ export function mapOpenRouterError(status, payload = {}) {
   };
   return {
     status: status >= 400 && status < 600 ? status : 502,
-    message: messages[status] || detail || "O OpenRouter não conseguiu processar a solicitação.",
+    message: messages[status] || "O OpenRouter não conseguiu processar a solicitação.",
   };
 }

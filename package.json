@@ -1,8 +1,8 @@
 {
   "name": "dia-whatsapp-transcriber",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "Extensão Chromium/Dia para transcrever áudios do WhatsApp Web via OpenRouter.",
+  "description": "Transcrição silenciosa de notas de voz no WhatsApp Web com Whisper local ou OpenRouter.",
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
@@ -10,5 +10,9 @@
     "fixture": "node scripts/serve-fixture.mjs",
     "check": "node --check server.mjs && node --check extension/background.js && node --check extension/content.js && node --check extension/page-bridge.js && node --check extension/popup.js && node scripts/validate-manifest.mjs",
     "lint:extension": "node scripts/validate-manifest.mjs"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
   }
 }

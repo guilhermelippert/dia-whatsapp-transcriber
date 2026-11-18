@@ -2,11 +2,10 @@
   const api = globalThis.browser || globalThis.chrome;
   const MAX_BYTES = 24 * 1024 * 1024;
   const MAX_CACHED_TRANSCRIPTS = 500;
-  const TRANSCRIPT_STORAGE_KEY = "wppTranscriber.transcripts.v1";
-  const SUMMARY_STORAGE_KEY = "wppTranscriber.summaries.v1";
-  const mounted = new WeakSet();
+  const TRANSCRIPT_STORAGE_KEY = "wppTranscriber.transcripts.v2";
+  const SUMMARY_STORAGE_KEY = "wppTranscriber.summaries.v2";
+  const mounted = new Map();
   const queued = new WeakSet();
-  const autoAttempted = new Set();
   const transcriptCache = new Map();
   const summaryCache = new Map();
   const storage = api?.storage?.local;
@@ -14,29 +13,35 @@
   let persistenceQueue = Promise.resolve();
   let transcriptionQueue = Promise.resolve();
   let scanTimer;
-  const VOICE_MESSAGE_LABEL = /^(play|pause|reproduzir|pausar)\s+(voice message|mensagem de voz|áudio|audio)\b/i;
-  const PLAY_VOICE_MESSAGE_LABEL = /^(play|reproduzir)\s+(voice message|mensagem de voz|áudio|audio)\b/i;
-  const PAUSE_VOICE_MESSAGE_LABEL = /^(pause|pausar)\s+(voice message|mensagem de voz|áudio|audio)\b/i;
+  let provider;
+  let healthRequest;
+  const VOICE_MESSAGE_LABEL = /^(play|pause|download|reproduzir|pausar|baixar)\s+(voice message|voice note|mensagem de voz|áudio|audio)\b/iu;
+  const AUDIO_SELECTOR = 'audio, [data-icon="audio-play"], [data-icon="audio-pause"], [data-icon="audio-download"]';
 
-  function formatFromMime(mime = "", source = "") {
-    const value = `${mime} ${source}`.toLowerCase();
+  function refreshProvider() {
+    if (healthRequest) return healthRequest;
+    healthRequest = (async () => {
+      try {
+        const health = await api.runtime.sendMessage({ type: "health" });
+        provider = health?.ok ? health.provider : undefined;
+      } catch {
+        provider = undefined;
+      }
+      for (const binding of mounted.values()) binding.updateSummaryAction();
+    })().finally(() => { healthRequest = undefined; });
+    return healthRequest;
+  }
+
+  function formatFromMime(mime) {
+    const value = mime.split(";", 1)[0].toLowerCase();
+    if (value === "audio/webm") return "webm";
     if (value.includes("ogg") || value.includes("opus")) return "ogg";
-    if (value.includes("webm")) return "webm";
     if (value.includes("mpeg") || value.includes("mp3")) return "mp3";
     if (value.includes("mp4") || value.includes("m4a")) return "m4a";
     if (value.includes("wav")) return "wav";
     if (value.includes("flac")) return "flac";
     if (value.includes("aac")) return "aac";
-    return "ogg";
-  }
-
-  function bytesToBase64(buffer) {
-    const bytes = new Uint8Array(buffer);
-    let binary = "";
-    for (let i = 0; i < bytes.length; i += 0x8000) {
-      binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-    }
-    return btoa(binary);
+    throw new Error("Formato de áudio não suportado.");
   }
 
   async function copyText(text) {
@@ -60,90 +65,36 @@
     if (!copied) throw new Error("Não foi possível copiar o texto.");
   }
 
-  async function requestPageBlob(eventName, detail = {}, timeoutMs = 8_000) {
+  function readMessage(messageId) {
     const requestId = crypto.randomUUID();
+    const unavailable = "Este áudio não está disponível para transcrição silenciosa.";
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         window.removeEventListener("message", onResult);
-        reject(new Error("Não foi possível acessar este áudio. Recarregue a conversa."));
-      }, timeoutMs);
+        reject(new Error(unavailable));
+      }, 30_000);
       function onResult(event) {
-        if (event.source !== window) return;
-        const message = event.data;
-        if (message?.source !== "wpp-transcriber" || message.direction !== "from-page" || message.type !== "result") return;
-        if (message.requestId !== requestId) return;
+        const reply = event.data;
+        if (event.source !== window || event.origin !== location.origin
+          || reply?.source !== "wpp-transcriber" || reply.direction !== "from-page"
+          || reply.type !== "result" || reply.requestId !== requestId || reply.messageId !== messageId) return;
         clearTimeout(timeout);
         window.removeEventListener("message", onResult);
-        if (message.error) reject(new Error("Não foi possível acessar este áudio. Recarregue a conversa."));
-        else resolve(message);
+        try {
+          if (reply.error === "TOO_LARGE") throw new Error("Este áudio ultrapassa o limite de 24 MB.");
+          if (reply.error || !Number.isSafeInteger(reply.size) || reply.size <= 0 || reply.size > MAX_BYTES
+            || typeof reply.data !== "string" || reply.data.length !== 4 * Math.ceil(reply.size / 3)
+            || !reply.mime?.startsWith("audio/")) throw new Error(unavailable);
+          resolve({ data: reply.data, format: formatFromMime(reply.mime) });
+        } catch (error) {
+          reject(error);
+        }
       }
       window.addEventListener("message", onResult);
       window.postMessage({
-        source: "wpp-transcriber",
-        direction: "to-page",
-        type: eventName,
-        requestId,
-        ...detail,
-      }, "*");
+        source: "wpp-transcriber", direction: "to-page", type: "wpp-transcriber:message", requestId, messageId,
+      }, location.origin);
     });
-  }
-
-  function readThroughPage(url) {
-    return requestPageBlob("wpp-transcriber:read", { url });
-  }
-
-  function armPageCapture(captureId) {
-    window.postMessage({
-      source: "wpp-transcriber",
-      direction: "to-page",
-      type: "wpp-transcriber:arm",
-      captureId,
-    }, "*");
-  }
-
-  function readAssociatedThroughPage(captureId) {
-    return requestPageBlob("wpp-transcriber:associated", { captureId }, 5 * 60_000 + 15_000);
-  }
-
-  async function readAudio(audio) {
-    const source = audio.currentSrc || audio.src;
-    if (!source) throw new Error("Reproduza o áudio uma vez e tente novamente.");
-    try {
-      const response = await fetch(source);
-      if (!response.ok) throw new Error("FETCH_FAILED");
-      const blob = await response.blob();
-      if (blob.size > MAX_BYTES) throw new Error("Este áudio ultrapassa o limite de 24 MB.");
-      return {
-        data: bytesToBase64(await blob.arrayBuffer()),
-        format: formatFromMime(blob.type, source),
-      };
-    } catch (error) {
-      if (error.message.includes("24 MB")) throw error;
-      const bridged = await readThroughPage(source);
-      if (bridged.size > MAX_BYTES) throw new Error("Este áudio ultrapassa o limite de 24 MB.");
-      return { data: bridged.data, format: formatFromMime(bridged.mime, source) };
-    }
-  }
-
-  async function readVoiceButton(playButton) {
-    const captureId = crypto.randomUUID();
-    armPageCapture(captureId);
-    const wasPlay = PLAY_VOICE_MESSAGE_LABEL.test(playButton.getAttribute("aria-label") || "");
-    if (wasPlay) {
-      playButton.click();
-      await new Promise((resolve) => setTimeout(resolve, 150));
-      const rowButtons = playButton.closest('[role="row"]')?.querySelectorAll("button[aria-label]") || [];
-      const pauseButton = [...rowButtons].find((button) => PAUSE_VOICE_MESSAGE_LABEL.test(button.getAttribute("aria-label") || ""))
-        || [...document.querySelectorAll("button[aria-label]")].find((button) => PAUSE_VOICE_MESSAGE_LABEL.test(button.getAttribute("aria-label") || ""));
-      pauseButton?.click();
-    }
-    const bridged = await readAssociatedThroughPage(captureId);
-    if (bridged.size > MAX_BYTES) throw new Error("Este áudio ultrapassa o limite de 24 MB.");
-    return { data: bridged.data, format: formatFromMime(bridged.mime, "") };
-  }
-
-  function findMessage(target) {
-    return target.closest('[data-id], [role="row"]') || target.parentElement?.parentElement || target.parentElement;
   }
 
   function findPanelLayout(target, message) {
@@ -180,23 +131,6 @@
         ? "Transcrição concluída."
         : state === "error" ? "Falha ao transcrever o áudio." : "Transcrevendo áudio.";
     }
-  }
-
-  function currentConversation() {
-    return document.querySelector("header [title]")?.getAttribute("title") || document.title;
-  }
-
-  function messageKey(target, message) {
-    const dataId = message?.getAttribute("data-id") || target.closest("[data-id]")?.getAttribute("data-id");
-    if (dataId) return { key: `id:${dataId}`, stable: true };
-    const source = target instanceof HTMLAudioElement ? target.currentSrc || target.src : "";
-    if (source) return { key: `src:${source}`, stable: true };
-    const chat = currentConversation();
-    const signature = (message?.textContent || target.getAttribute("aria-label") || "audio")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 240);
-    return { key: `fallback:${chat}:${signature}`, stable: false };
   }
 
   function rememberBounded(collection, key, value) {
@@ -253,10 +187,9 @@
   }
 
   function mount(target) {
-    if (mounted.has(target)) return;
-    const message = findMessage(target);
-    if (!message || message.querySelector(":scope .wpp-transcriber")) return;
-    mounted.add(target);
+    const message = target.closest("[data-id]");
+    const messageId = message?.dataset.id;
+    if (!messageId || mounted.has(message)) return;
     const layout = findPanelLayout(target, message);
 
     const panel = document.createElement("div");
@@ -288,12 +221,27 @@
     summaryButton.innerHTML = "<span>Resumir</span>";
     panel.querySelector(".wpp-transcriber__primary").appendChild(summaryButton);
     const copy = panel.querySelector(".wpp-transcriber__copy");
-    const identity = messageKey(target, message);
-    const { key } = identity;
-    const conversation = currentConversation();
-    let transcriptText = transcriptCache.get(key) || "";
-    let summaryText = summaryCache.get(key) || "";
-    let lastAudioPayload = null;
+    const key = `id:${messageId}`;
+    const isCurrent = () => message.isConnected && message.dataset.id === messageId
+      && target.closest("[data-id]") === message && panel.closest("[data-id]") === message;
+    let transcriptText = "";
+    let summaryText = "";
+
+    function updateSummaryAction() {
+      summaryButton.style.display = summaryText || provider === "openrouter" ? "" : "none";
+    }
+    mounted.set(message, { panel, isCurrent, updateSummaryAction });
+    updateSummaryAction();
+
+    function showTranscript() {
+      updateSummaryAction();
+      setState(panel, "success", transcriptText);
+      panel.dataset.view = "transcript";
+      panel.dataset.hasTranscript = "true";
+      button.querySelector("span").textContent = "Refazer";
+      summaryButton.querySelector("span").textContent = summaryText ? "Ver resumo" : "Resumir";
+      summaryButton.setAttribute("aria-label", summaryText ? "Mostrar resumo" : "Resumir transcrição");
+    }
 
     function showText(text, view) {
       panel.querySelector(".wpp-transcriber__text").textContent = text;
@@ -306,16 +254,21 @@
 
     async function transcribe({ automatic = false } = {}) {
       if (panel.dataset.state === "loading") return;
-      if (automatic && (!target.isConnected || currentConversation() !== conversation)) return;
+      if (!isCurrent()) return;
+      if (automatic && transcriptCache.has(key)) {
+        transcriptText = transcriptCache.get(key);
+        summaryText = summaryCache.get(key) || "";
+        showTranscript();
+        return;
+      }
       button.disabled = true;
       summaryButton.disabled = true;
       delete panel.dataset.hasTranscript;
       button.querySelector("span").textContent = "Transcrevendo…";
       setState(panel, "loading", "Preparando o áudio com segurança…");
       try {
-        const payload = lastAudioPayload
-          || (target instanceof HTMLAudioElement ? await readAudio(target) : await readVoiceButton(target));
-        lastAudioPayload = payload;
+        const payload = await readMessage(messageId);
+        if (!isCurrent()) return;
         setState(panel, "loading", "Enviando para transcrição…");
         const result = await api.runtime.sendMessage({ type: "transcribe", ...payload });
         if (!result?.ok) throw new Error(result?.error || "Não foi possível transcrever.");
@@ -324,14 +277,10 @@
         summaryCache.delete(key);
         rememberBounded(transcriptCache, key, transcriptText);
         persistCache();
-        if (automatic && (!target.isConnected || currentConversation() !== conversation)) return;
-        setState(panel, "success", transcriptText);
-        panel.dataset.view = "transcript";
-        panel.dataset.hasTranscript = "true";
-        summaryButton.querySelector("span").textContent = "Resumir";
-        summaryButton.setAttribute("aria-label", "Resumir transcrição");
-        button.querySelector("span").textContent = "Refazer";
+        if (isCurrent()) showTranscript();
+        if (!provider) void refreshProvider();
       } catch (error) {
+        if (!isCurrent()) return;
         setState(panel, "error", error.message || "Não foi possível transcrever.");
         button.querySelector("span").textContent = "Tentar novamente";
       } finally {
@@ -341,7 +290,7 @@
     }
 
     async function summarize() {
-      if (!transcriptText || summaryButton.disabled) return;
+      if (!isCurrent() || !transcriptText || summaryButton.disabled) return;
       if (summaryText) {
         showText(panel.dataset.view === "summary" ? transcriptText : summaryText,
           panel.dataset.view === "summary" ? "transcript" : "summary");
@@ -354,11 +303,19 @@
       summaryButton.setAttribute("aria-label", "Resumindo transcrição");
       panel.querySelector(".wpp-transcriber__announcement").textContent = "Resumindo transcrição.";
       try {
+        await refreshProvider();
+        if (provider !== "openrouter" || !isCurrent()) {
+          summaryButton.querySelector("span").textContent = "Resumir";
+          summaryButton.setAttribute("aria-label", "Resumir transcrição");
+          panel.querySelector(".wpp-transcriber__announcement").textContent = "Resumo online indisponível.";
+          return;
+        }
         const result = await api.runtime.sendMessage({ type: "summarize", text: transcriptText });
         if (!result?.ok) throw new Error(result?.error || "Não foi possível resumir.");
         summaryText = result.text;
         rememberBounded(summaryCache, key, summaryText);
         persistCache();
+        if (!isCurrent()) return;
         showText(summaryText, "summary");
         panel.querySelector(".wpp-transcriber__announcement").textContent = "Resumo concluído.";
       } catch (error) {
@@ -374,7 +331,7 @@
 
     button.addEventListener("click", (event) => {
       event.stopPropagation();
-      enqueue(target, () => transcribe({ automatic: false }));
+      enqueue(panel, () => transcribe({ automatic: false }));
     });
     summaryButton.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -393,34 +350,34 @@
     });
     layout.host.appendChild(panel);
 
-    if (transcriptText) {
-      setState(panel, "success", transcriptText);
-      panel.dataset.hasTranscript = "true";
-      button.querySelector("span").textContent = "Refazer";
-      summaryButton.querySelector("span").textContent = summaryText ? "Ver resumo" : "Resumir";
-      summaryButton.setAttribute("aria-label", summaryText ? "Mostrar resumo" : "Resumir transcrição");
-      return;
-    }
-    if (identity.stable && !autoAttempted.has(key)) {
-      autoAttempted.add(key);
-      if (autoAttempted.size > MAX_CACHED_TRANSCRIPTS) autoAttempted.delete(autoAttempted.values().next().value);
-      enqueue(target, () => transcribe({ automatic: true }));
-    }
+    enqueue(panel, () => transcribe({ automatic: true }));
   }
 
   function scan() {
+    scanTimer = undefined;
     if (!cacheReady) return;
-    document.querySelectorAll("audio").forEach(mount);
-    document.querySelectorAll("button[aria-label]").forEach((button) => {
-      if (VOICE_MESSAGE_LABEL.test(button.getAttribute("aria-label") || "")) mount(button);
+    for (const [message, binding] of mounted) {
+      if (binding.isCurrent()) continue;
+      binding.panel.remove();
+      mounted.delete(message);
+    }
+    document.querySelectorAll(AUDIO_SELECTOR).forEach(mount);
+    document.querySelectorAll('button[aria-label], [role="button"][aria-label]').forEach((button) => {
+      if (VOICE_MESSAGE_LABEL.test(button.getAttribute("aria-label"))) mount(button);
     });
   }
 
   const observer = new MutationObserver(() => {
-    clearTimeout(scanTimer);
-    scanTimer = setTimeout(scan, 120);
+    if (scanTimer === undefined) scanTimer = setTimeout(scan, 80);
   });
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+  observer.observe(document.documentElement, {
+    childList: true, subtree: true, attributes: true, attributeFilter: ["data-id", "aria-label", "data-icon", "role"],
+  });
   document.documentElement.dataset.wppTranscriberLoaded = "true";
+  window.addEventListener("focus", refreshProvider);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) void refreshProvider();
+  });
+  void refreshProvider();
   restorePersistedCache();
 })();

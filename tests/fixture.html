@@ -26,7 +26,7 @@
     <main class="phone">
       <div data-id="fixture-message"><div class="message-column incoming"><div class="audio-bubble"><audio controls src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA="></audio></div></div></div>
       <div data-id="fixture-voice-message"><div class="message-column outgoing"><div class="audio-bubble"><button class="voice-button" type="button" aria-label="Play voice message">▶</button></div></div></div>
-      <p class="hint">Fixture visual — clique em Transcrever</p>
+      <p class="hint">Fixture visual de transcrição automática</p>
       <div class="fixture-actions">
         <button id="add-audio" type="button">Adicionar áudio novo</button>
         <button id="rerender-audio" type="button">Re-renderizar último</button>
@@ -65,6 +65,7 @@
         },
       });
       globalThis.browser = { storage: { local: fixtureStorage }, runtime: { sendMessage: async (message) => {
+        if (message.type === "health") return { ok: true, provider: "openrouter" };
         if (message.type === "summarize") {
           return { ok: true, text: "Resumo: o áudio explica os pontos principais de forma breve." };
         }
@@ -92,21 +93,23 @@
         replacement.innerHTML = '<div class="message-column incoming"><div class="audio-bubble"><button class="voice-button" type="button" aria-label="Play voice message">▶</button></div></div>';
         document.querySelector(".hint").before(replacement);
       });
-      window.addEventListener("message", (event) => {
-        const message = event.data;
-        if (event.source !== window || message?.source !== "wpp-transcriber" || message.direction !== "to-page") return;
-        if (message.type !== "wpp-transcriber:associated") return;
-        window.postMessage({
-          source: "wpp-transcriber",
-          direction: "from-page",
-          type: "result",
-          requestId: message.requestId,
-          data: "UklGRg==",
-          mime: "audio/wav",
-          size: 4,
-        }, "*");
-      });
+      const models = new Map();
+      window.require = (name) => {
+        if (name !== "WAWebCollections") throw new Error("Unsupported module");
+        return { Msg: { get(id) {
+          if (!document.querySelector(`[data-id="${CSS.escape(id)}"]`)) return undefined;
+          if (!models.has(id)) models.set(id, {
+            id: { _serialized: id }, type: "ptt", mediaData: {},
+            async downloadMedia() {
+              const bytes = Uint8Array.from(atob("UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA="), c => c.charCodeAt(0));
+              this.mediaData.mediaBlob = new Blob([bytes], { type: "audio/wav" });
+            },
+          });
+          return models.get(id);
+        } } };
+      };
     </script>
+    <script src="../extension/page-bridge.js"></script>
     <script src="../extension/content.js"></script>
   </body>
 </html>
