@@ -9,9 +9,16 @@
   <body>
     <main>
       <div class="brand"><span class="brand__mark">T</span><div><h1>Transcritor</h1><p>WhatsApp Web</p></div></div>
-      <section class="status" data-state="loading">
+      <section class="status" role="status" data-state="loading">
         <span class="status__dot"></span>
         <div><strong>Verificando serviço…</strong><p>Consultando o serviço neste computador.</p></div>
+      </section>
+      <section id="consent" aria-labelledby="consent-heading">
+        <h2 id="consent-heading">Envio ao OpenRouter</h2>
+        <p>No modo OpenRouter, autorizar permite o envio automático das notas de voz visíveis ao abrir conversas. Clicar em Resumir envia a transcrição. O processamento pode gerar cobrança.</p>
+        <a href="https://github.com/guilhermelippert/whatsapp-transcriber/blob/main/PRIVACY.md" target="_blank" rel="noreferrer">Política de privacidade</a>
+        <p id="consent-state" role="status">Verificando autorização…</p>
+        <button id="toggle-consent" type="button" disabled>Autorizar envio ao OpenRouter</button>
       </section>
       <div id="cloud-settings" hidden>
         <label for="model">Modelo do OpenRouter</label>
@@ -22,7 +29,11 @@
         </select>
       </div>
       <div class="actions"><button id="save" hidden type="button">Salvar</button><button id="retry" type="button" class="secondary">Testar conexão</button></div>
-      <p class="privacy">As notas de voz visíveis são transcritas automaticamente, sem acionar o player.</p>
+      <label for="origin">Origem para ALLOWED_EXTENSION_ORIGINS</label>
+      <input id="origin" readonly spellcheck="false" aria-describedby="origin-help">
+      <p id="origin-help">Copie esta origem para ALLOWED_EXTENSION_ORIGINS no arquivo .env.local e reinicie o serviço.</p>
+      <button type="button" class="secondary" id="copy-origin">Copiar origem</button>
+      <p id="feedback" role="status"></p>
     </main>
     <script src="popup.js"></script>
   </body>

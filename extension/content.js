@@ -14,6 +14,8 @@
   let transcriptionQueue = Promise.resolve();
   let scanTimer;
   let provider;
+  let cloudConsentRequired = false;
+  let serviceError;
   let healthRequest;
   const VOICE_MESSAGE_LABEL = /^(play|pause|download|reproduzir|pausar|baixar)\s+(voice message|voice note|mensagem de voz|áudio|audio)\b/iu;
   const AUDIO_SELECTOR = 'audio, [data-icon="audio-play"], [data-icon="audio-pause"], [data-icon="audio-download"]';
@@ -24,8 +26,11 @@
       try {
         const health = await api.runtime.sendMessage({ type: "health" });
         provider = health?.ok ? health.provider : undefined;
+        cloudConsentRequired = health?.cloudConsentRequired === true;
+        serviceError = health?.ok ? undefined : health?.error || "Teste a conexão no popup do Transcritor.";
       } catch {
         provider = undefined;
+        serviceError = "Recarregue a aba do WhatsApp Web e teste a conexão no popup.";
       }
       for (const binding of mounted.values()) binding.updateSummaryAction();
     })().finally(() => { healthRequest = undefined; });
@@ -84,7 +89,9 @@
           if (reply.error === "TOO_LARGE") throw new Error("Este áudio ultrapassa o limite de 24 MB.");
           if (reply.error || !Number.isSafeInteger(reply.size) || reply.size <= 0 || reply.size > MAX_BYTES
             || typeof reply.data !== "string" || reply.data.length !== 4 * Math.ceil(reply.size / 3)
-            || !reply.mime?.startsWith("audio/")) throw new Error(unavailable);
+            || typeof reply.mime !== "string" || !reply.mime.startsWith("audio/")
+            || typeof reply.canonicalId !== "string" || !reply.canonicalId
+            || (!/^[a-z0-9]+$/i.test(messageId) && reply.canonicalId !== messageId)) throw new Error(unavailable);
           resolve({ data: reply.data, format: formatFromMime(reply.mime), canonicalId: reply.canonicalId });
         } catch (error) {
           reject(error);
@@ -220,6 +227,10 @@
     summaryButton.setAttribute("aria-label", "Resumir transcrição");
     summaryButton.innerHTML = "<span>Resumir</span>";
     panel.querySelector(".wpp-transcriber__primary").appendChild(summaryButton);
+    const summaryError = document.createElement("span");
+    summaryError.className = "wpp-transcriber__summary-error";
+    summaryError.setAttribute("role", "status");
+    panel.querySelector(".wpp-transcriber__result").appendChild(summaryError);
     const copy = panel.querySelector(".wpp-transcriber__copy");
     let key = /^[a-z0-9]+$/i.test(messageId) ? null : `id:${messageId}`;
     const isCurrent = () => message.isConnected && message.dataset.id === messageId
@@ -264,9 +275,15 @@
       button.disabled = true;
       summaryButton.disabled = true;
       delete panel.dataset.hasTranscript;
+      summaryError.textContent = "";
       button.querySelector("span").textContent = "Transcrevendo…";
       setState(panel, "loading", "Preparando o áudio com segurança…");
       try {
+        if (!automatic) await refreshProvider();
+        else if (healthRequest) await healthRequest;
+        if (serviceError) throw new Error(serviceError);
+        if (cloudConsentRequired) throw new Error("Autorize o envio ao OpenRouter no popup e tente novamente.");
+        if (!isCurrent()) return;
         const { data, format, canonicalId } = await readMessage(messageId);
         if (!isCurrent()) return;
         if (canonicalId) key = `id:${canonicalId}`;
@@ -307,6 +324,7 @@
       button.disabled = true;
       summaryButton.disabled = true;
       summaryButton.removeAttribute("title");
+      summaryError.textContent = "";
       summaryButton.querySelector("span").textContent = "Resumindo…";
       summaryButton.setAttribute("aria-label", "Resumindo transcrição");
       panel.querySelector(".wpp-transcriber__announcement").textContent = "Resumindo transcrição.";
@@ -330,7 +348,7 @@
         summaryButton.querySelector("span").textContent = "Tentar resumo";
         summaryButton.setAttribute("aria-label", "Tentar resumir transcrição");
         summaryButton.title = error.message || "Não foi possível resumir.";
-        panel.querySelector(".wpp-transcriber__announcement").textContent = "Falha ao resumir a transcrição.";
+        summaryError.textContent = summaryButton.title;
       } finally {
         button.disabled = false;
         summaryButton.disabled = false;
@@ -382,6 +400,9 @@
     childList: true, subtree: true, attributes: true, attributeFilter: ["data-id", "aria-label", "data-icon", "role"],
   });
   document.documentElement.dataset.wppTranscriberLoaded = "true";
+  api?.storage?.onChanged?.addListener((changes, area) => {
+    if (area === "local" && changes.openRouterConsent) void refreshProvider();
+  });
   window.addEventListener("focus", refreshProvider);
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) void refreshProvider();

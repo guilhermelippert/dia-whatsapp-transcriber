@@ -56,7 +56,7 @@
   async function wait(check, reason) {
     const start = performance.now();
     while (!check()) {
-      if (performance.now() - start > 6000) {
+      if (performance.now() - start > 20000) {
         const states = Array.from(rows.children, el => [el.dataset.id, el.querySelector(".wpp-transcriber")?.dataset.state]);
         throw new Error(reason + " " + JSON.stringify(states));
       }

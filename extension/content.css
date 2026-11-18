@@ -111,3 +111,6 @@
   .wpp-transcriber[data-direction="outgoing"] .wpp-transcriber__result { background: rgba(0, 92, 75, 0.96); }
   .wpp-transcriber[data-state="loading"] .wpp-transcriber__text { color: #aebac1; }
 }
+
+.wpp-transcriber__summary-error { padding: 4px 10px; font-size: 12px; }
+.wpp-transcriber__summary-error:empty { display: none; }

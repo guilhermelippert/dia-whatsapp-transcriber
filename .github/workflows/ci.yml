@@ -10,10 +10,10 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
       - run: npm run check
@@ -27,3 +27,29 @@ jobs:
         run: |
           test -x "$HELIUM_BINARY"
           npm test
+
+      - name: Verificar arquivos de instalação
+        run: |
+          npm run package:release
+          unzip -tq dist/whatsapp-transcriber-extension.zip
+          unzip -q dist/whatsapp-transcriber-setup.zip -d "$RUNNER_TEMP/primeiro uso"
+          cd "$RUNNER_TEMP/primeiro uso/whatsapp-transcriber"
+          npm run check
+          node --test tests/setup.test.mjs
+
+  setup:
+    name: Instalação em ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+      - run: npm run check
+      - run: node --test tests/setup.test.mjs

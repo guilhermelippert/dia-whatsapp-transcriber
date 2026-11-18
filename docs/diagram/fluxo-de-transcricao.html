@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fluxo de transcrição de notas de voz</title>
+  <style>
+    body { margin: 0; background: #f7f9f8; color: #111b21; font-family: system-ui, sans-serif; }
+    main { max-width: 960px; margin: 32px auto; padding: 0 16px; }
+    .diagram-container { width: 100%; overflow-x: auto; }
+    .diagram-container:focus-visible { outline: 3px solid #006c4c; }
+    svg { display: block; width: 100%; min-width: 960px; }
+    h1 { font-size: 1.5rem; }
+    details { margin: 20px 0; line-height: 1.6; }
+    summary { cursor: pointer; }
+    @media print {
+      main { margin: 0; padding: 0; }
+      .diagram-container { overflow: visible; }
+      svg { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Fluxo de transcrição de notas de voz</h1>
+  <div class="diagram-container" role="region" aria-label="Diagrama do fluxo de transcrição" tabindex="0">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 600" role="img"
+         aria-labelledby="fluxo-de-transcricao-title fluxo-de-transcricao-desc" lang="pt-BR">
+      <title id="fluxo-de-transcricao-title">Da nota de voz ao texto na conversa</title>
+      <desc id="fluxo-de-transcricao-desc">A extensão lê a nota visível sem reproduzi-la, o serviço local encaminha o áudio ao Whisper no computador ou ao OpenRouter na nuvem conforme a configuração, e a transcrição aparece abaixo da mensagem.</desc>
+      <defs>
+        <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M0 0 L8 4 L0 8 Z" fill="#536961"/>
+        </marker>
+        <marker id="accent" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M0 0 L8 4 L0 8 Z" fill="#006c4c"/>
+        </marker>
+      </defs>
+      <rect width="960" height="600" rx="12" fill="#f7f9f8"/>
+      <g font-family="system-ui, sans-serif" fill="#111b21">
+        <text x="24" y="54" font-size="32" font-family="Georgia, serif">Da nota de voz ao texto na conversa</text>
+        <g fill="#435b52" font-size="14" font-weight="600">
+          <text x="152" y="104">Leitura</text>
+          <text x="352" y="104" fill="#006c4c">Escolha do provedor</text>
+          <text x="568" y="104">Transcrição</text>
+          <text x="776" y="104">Exibição</text>
+        </g>
+        <rect x="16" y="124" width="928" height="128" fill="#ecf2ee"/>
+        <rect x="16" y="380" width="928" height="128" fill="#ecf2ee"/>
+        <path d="M136 124 V508 M16 252 H944 M16 380 H944" fill="none" stroke="#cbd8d1"/>
+        <g fill="#435b52" font-size="15" font-weight="600">
+          <text x="28" y="184">WhatsApp</text>
+          <text x="28" y="204">Web</text>
+          <text x="28" y="322">Computador</text>
+          <text x="28" y="450">Nuvem</text>
+        </g>
+
+        <g fill="none" stroke="#536961" stroke-width="2" marker-end="url(#arrow)">
+          <path d="M328 188 H424 Q432 188 432 196 V274" stroke="#006c4c" marker-end="url(#accent)"/>
+          <path d="M512 308 H566"/>
+          <path d="M512 336 H532 Q540 336 540 344 V436 Q540 444 548 444 H566"/>
+          <path d="M720 316 H816 Q824 316 824 308 V230"/>
+          <path d="M720 444 H872 Q880 444 880 436 V230"/>
+        </g>
+        <rect x="344" y="156" width="72" height="24" fill="#ecf2ee"/>
+        <text x="380" y="173" font-size="13" font-weight="600" text-anchor="middle" fill="#006c4c">ÁUDIO</text>
+
+        <g fill="#fff" stroke="#80958b">
+          <rect x="148" y="148" width="180" height="80" rx="6"/>
+          <rect x="352" y="276" width="160" height="80" rx="6" fill="#e0f2e8" stroke="#006c4c" stroke-width="2"/>
+          <rect x="568" y="276" width="152" height="80" rx="6"/>
+          <rect x="568" y="404" width="152" height="80" rx="6"/>
+          <rect x="776" y="148" width="152" height="80" rx="6"/>
+        </g>
+        <g text-anchor="middle">
+          <g font-size="18" font-weight="600">
+            <text x="238" y="184">Nota de voz visível</text>
+            <text x="432" y="312">Serviço local</text>
+            <text x="644" y="312">Whisper</text>
+            <text x="644" y="440">OpenRouter</text>
+            <text x="852" y="184">Texto transcrito</text>
+          </g>
+          <g font-size="14" fill="#435b52">
+            <text x="238" y="208">Leitura sem reprodução</text>
+            <text x="432" y="336">Encaminha o áudio</text>
+            <text x="644" y="336">Processa localmente</text>
+            <text x="644" y="464">Processa na nuvem</text>
+            <text x="852" y="208">Abaixo da mensagem</text>
+          </g>
+        </g>
+        <path d="M24 534 H936" stroke="#cbd8d1"/>
+        <text x="24" y="569" font-size="17" fill="#314e41">O serviço usa um provedor por vez. O áudio só vai à nuvem no modo OpenRouter.</text>
+      </g>
+    </svg>
+  </div>
+  <details>
+    <summary>Ler o fluxo em texto</summary>
+    <ol>
+      <li>A extensão lê a nota de voz visível no WhatsApp Web sem reproduzir o áudio.</li>
+      <li>O serviço local recebe o áudio. No modo Whisper, ele é transcrito no computador. No modo OpenRouter, o serviço envia o áudio para transcrição na nuvem.</li>
+      <li>O serviço devolve o texto à extensão, que o exibe abaixo da mensagem original.</li>
+    </ol>
+  </details>
+</main>
+</body>
+</html>
