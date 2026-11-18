@@ -85,7 +85,7 @@
           if (reply.error || !Number.isSafeInteger(reply.size) || reply.size <= 0 || reply.size > MAX_BYTES
             || typeof reply.data !== "string" || reply.data.length !== 4 * Math.ceil(reply.size / 3)
             || !reply.mime?.startsWith("audio/")) throw new Error(unavailable);
-          resolve({ data: reply.data, format: formatFromMime(reply.mime) });
+          resolve({ data: reply.data, format: formatFromMime(reply.mime), canonicalId: reply.canonicalId });
         } catch (error) {
           reject(error);
         }
@@ -221,7 +221,7 @@
     summaryButton.innerHTML = "<span>Resumir</span>";
     panel.querySelector(".wpp-transcriber__primary").appendChild(summaryButton);
     const copy = panel.querySelector(".wpp-transcriber__copy");
-    const key = `id:${messageId}`;
+    let key = /^[a-z0-9]+$/i.test(messageId) ? null : `id:${messageId}`;
     const isCurrent = () => message.isConnected && message.dataset.id === messageId
       && target.closest("[data-id]") === message && panel.closest("[data-id]") === message;
     let transcriptText = "";
@@ -267,10 +267,18 @@
       button.querySelector("span").textContent = "Transcrevendo…";
       setState(panel, "loading", "Preparando o áudio com segurança…");
       try {
-        const payload = await readMessage(messageId);
+        const { data, format, canonicalId } = await readMessage(messageId);
         if (!isCurrent()) return;
+        if (canonicalId) key = `id:${canonicalId}`;
+        if (!key) throw new Error("Não foi possível identificar a mensagem.");
+        if (automatic && transcriptCache.has(key)) {
+          transcriptText = transcriptCache.get(key);
+          summaryText = summaryCache.get(key) || "";
+          showTranscript();
+          return;
+        }
         setState(panel, "loading", "Enviando para transcrição…");
-        const result = await api.runtime.sendMessage({ type: "transcribe", ...payload });
+        const result = await api.runtime.sendMessage({ type: "transcribe", data, format });
         if (!result?.ok) throw new Error(result?.error || "Não foi possível transcrever.");
         transcriptText = result.text;
         summaryText = "";
