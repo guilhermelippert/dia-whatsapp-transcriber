@@ -2,7 +2,7 @@ import http from "node:http";
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 import { transcribeLocal } from "./src/local-whisper.mjs";
-import { providerConfig, providerHealth } from "./src/provider-config.mjs";
+import { providerConfig, providerHealth, serverPort } from "./src/provider-config.mjs";
 import {
   extractChatCompletionText, isTrustedBrowserOrigin, mapOpenRouterError, parseEnvFile,
   validateSummaryInput, validateTranscriptionInput,
@@ -10,7 +10,10 @@ import {
 
 const AUDIO_BODY_LIMIT = 32 * 1024 * 1024 + 4096;
 const SUMMARY_BODY_LIMIT = 1200_000 + 4096; // 200k JSON characters, including unicode escapes.
-const routes = { "/health": "GET", "/transcribe": "POST", "/summarize": "POST" };
+const PROVIDER_BODY_LIMIT = 2 * 1024 * 1024;
+const WORKER_MEDIA_TYPE = "application/vnd.whatsapp-transcriber+json";
+const PREFLIGHT_HEADERS = new Set(["accept", "content-type"]);
+const routes = { "/health": "GET", "/pair": "POST", "/transcribe": "POST", "/summarize": "POST" };
 
 function failure(status, message) {
   return Object.assign(new Error(message), { status });
@@ -32,6 +35,24 @@ async function readJson(req, limit) {
   } catch {
     throw failure(400, "JSON inválido.");
   }
+}
+
+async function readProviderJson(response) {
+  const tooLarge = () => failure(502, "A resposta do provedor ultrapassa o limite.");
+  if (Number(response.headers.get("content-length")) > PROVIDER_BODY_LIMIT) {
+    await response.body?.cancel();
+    throw tooLarge();
+  }
+  if (!response.body) throw failure(502, "O provedor retornou uma resposta vazia.");
+  const chunks = [];
+  let bytes = 0;
+  // Fetch exposes decoded bytes. Count them even when the declared size is smaller.
+  for await (const chunk of response.body) {
+    bytes += chunk.byteLength;
+    if (bytes > PROVIDER_BODY_LIMIT) throw tooLarge();
+    chunks.push(chunk);
+  }
+  return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks, bytes)));
 }
 
 async function requestOpenRouter(config, input, isSummary, signal, fetchImpl) {
@@ -65,8 +86,8 @@ async function requestOpenRouter(config, input, isSummary, signal, fetchImpl) {
     const mapped = mapOpenRouterError(upstream.status);
     throw failure(mapped.status, mapped.message);
   }
-  const payload = await upstream.json();
-  const text = isSummary ? extractChatCompletionText(payload) : payload.text?.trim();
+  const payload = await readProviderJson(upstream);
+  const text = isSummary ? extractChatCompletionText(payload) : typeof payload?.text === "string" && payload.text.trim();
   if (!text) throw failure(502, "O provedor não retornou uma transcrição.");
   return { text, usage: payload.usage || null };
 }
@@ -75,16 +96,18 @@ export function createTranscriberServer(config, { fetchImpl = fetch } = {}) {
   let active = 0;
   return http.createServer({ requestTimeout: 30_000, headersTimeout: 10_000, maxHeaderSize: 8192 }, async (req, res) => {
     const json = (status, body) => {
-      res.writeHead(status, {
-        "Content-Type": "application/json; charset=utf-8",
-        ...(status >= 400 ? { Connection: "close" } : {}),
-      });
+      if (!res.headersSent) {
+        res.writeHead(status, {
+          "Content-Type": "application/json; charset=utf-8",
+          ...(status >= 400 ? { Connection: "close" } : {}),
+        });
+      }
       res.end(JSON.stringify(body));
     };
-    const reject = (status, error) => json(status, { error });
+    const reject = (status, error) => json(status, res.headersSent ? { error, status } : { error });
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("Vary", "Origin");
+    res.setHeader("Vary", "Origin, Accept");
     const port = req.socket.localPort;
     const authority = port === 80 ? "127.0.0.1" : `127.0.0.1:${port}`;
     if (req.headers.host !== authority) return reject(403, "Host não permitido.");
@@ -100,18 +123,21 @@ export function createTranscriberServer(config, { fetchImpl = fetch } = {}) {
     if (req.method === "OPTIONS") {
       const headers = req.headers["access-control-request-headers"] || "";
       if (req.headers["access-control-request-method"] !== method ||
-          headers.split(",").some(value => value.trim() && value.trim().toLowerCase() !== "content-type")) {
+          headers.split(",").some(value => value.trim() && !PREFLIGHT_HEADERS.has(value.trim().toLowerCase()))) {
         return reject(403, "Preflight não permitido.");
       }
-      res.writeHead(204, { "Access-Control-Allow-Methods": method, "Access-Control-Allow-Headers": "Content-Type" });
+      res.writeHead(204, { "Access-Control-Allow-Methods": method, "Access-Control-Allow-Headers": "Accept, Content-Type" });
       return res.end();
     }
     if (req.method !== method) {
       res.setHeader("Allow", `${method}, OPTIONS`);
       return reject(405, "Método não permitido.");
     }
+    if (req.url === "/pair" && (req.headers["transfer-encoding"] || Number(req.headers["content-length"] || 0) !== 0)) {
+      return reject(400, "O pareamento exige uma requisição sem corpo.");
+    }
     const health = providerHealth(config);
-    if (req.url === "/health") return json(health.ok ? 200 : 503, health);
+    if (req.url === "/health" || req.url === "/pair") return json(health.ok ? 200 : 503, health);
     if (!health.ok) return reject(503, health.error);
     const summary = req.url === "/summarize";
     if (summary && !health.summaryAvailable) return reject(403, "Resumo na nuvem desativado no modo local.");
@@ -129,15 +155,26 @@ export function createTranscriberServer(config, { fetchImpl = fetch } = {}) {
     const signal = AbortSignal.any([timeout, disconnect.signal]);
     try {
       const body = await readJson(req, summary ? SUMMARY_BODY_LIMIT : AUDIO_BODY_LIMIT);
+      if (config.provider === "openrouter" && body?.allowCloud !== true) {
+        return reject(403, "Autorize o envio para a nuvem na extensão.");
+      }
       let input;
       try {
         input = summary ? validateSummaryInput(body) : validateTranscriptionInput(body);
       } catch (error) {
         throw failure(error.status || 400, error.message);
       }
+      signal.throwIfAborted();
+      if (req.headers.accept?.split(",").some(type => type.trim().toLowerCase() === WORKER_MEDIA_TYPE)) {
+        // MV3 needs a response before inference finishes. Leading whitespace keeps the body valid JSON.
+        res.writeHead(200, { "Content-Type": WORKER_MEDIA_TYPE + "; charset=utf-8" });
+        res.flushHeaders();
+        res.write(" ");
+      }
       const result = config.provider === "local"
         ? await transcribeLocal(config, input, signal)
         : await requestOpenRouter(config, input, summary, signal, fetchImpl);
+      signal.throwIfAborted();
       json(200, result);
     } catch (error) {
       if (disconnect.signal.aborted || res.destroyed) return;
@@ -158,7 +195,7 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
     if (error.code !== "ENOENT") throw error;
   }
   env = { ...env, ...process.env };
-  const port = Number(env.PORT || 43110);
+  const port = serverPort(env.PORT);
   const server = createTranscriberServer(providerConfig(env));
   server.listen(port, "127.0.0.1", () => {
     console.log(`Transcritor pronto em http://127.0.0.1:${server.address().port}`);

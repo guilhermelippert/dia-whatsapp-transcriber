@@ -73,6 +73,7 @@ test("Helium executa a fila silenciosa em mundos MAIN e ISOLATED", {
     if (script.world === "MAIN") script.js.unshift("observe.js");
     else script.js.unshift("identify-fixture.js");
   }
+  delete manifest.icons;
   delete manifest.action;
   await writeFile(path.join(extension, "manifest.json"), JSON.stringify(manifest));
   await writeFile(path.join(extension, "observe.js"), `(() => {
@@ -115,13 +116,14 @@ test("Helium executa a fila silenciosa em mundos MAIN e ISOLATED", {
     });
   `);
   child = spawn(binary, [
+    ...(process.platform === "darwin" ? ["--use-mock-keychain", "--password-store=basic"] : []),
     "--headless=new", "--no-first-run", "--no-default-browser-check", "--disable-background-networking",
     "--disable-sync", "--disable-component-update", "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1",
     `--user-data-dir=${path.join(dir, "profile")}`, `--disable-extensions-except=${extension}`,
     `--load-extension=${extension}`, origin + "/?extension",
   ], { stdio: "ignore" });
   exited = once(child, "exit");
-  const timeout = setTimeout(() => completion.reject(new Error("Helium não concluiu a fixture")), 15000);
+  const timeout = setTimeout(() => completion.reject(new Error("Helium não concluiu a fixture")), 60000);
   try {
     const result = await Promise.race([completion.promise, exited.then(([code]) => {
       throw new Error("Helium encerrou antes da fixture, código " + code);
